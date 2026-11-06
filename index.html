@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>AI Pixel Office</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22><rect width=%2216%22 height=%2216%22 fill=%22%23f2b84b%22/><rect x=%224%22 y=%224%22 width=%228%22 height=%226%22 fill=%22%232b2f3a%22/></svg>" />
+  <link rel="stylesheet" href="./src/ui/hud.css" />
+</head>
+<body>
+  <div id="game"></div>
+
+  <!-- HUD: thanh trên cùng -->
+  <div id="hud-top">
+    <div class="panel" id="clock-box">
+      <div id="clock">Ngày 1 · 07:50</div>
+      <div id="event">Đầu ngày làm việc</div>
+    </div>
+    <div class="panel" id="speed-box">
+      <button data-speed="0" title="Tạm dừng">❚❚</button>
+      <button data-speed="1" class="active">1x</button>
+      <button data-speed="2">2x</button>
+      <button data-speed="4">4x</button>
+      <button data-speed="8">8x</button>
+    </div>
+  </div>
+
+  <!-- HUD: nút chuyển phòng -->
+  <div id="hud-bottom" class="panel">
+    <button data-room="all">Toàn cảnh</button>
+    <button data-room="work">Làm việc</button>
+    <button data-room="meeting">Họp</button>
+    <button data-room="server">Server</button>
+    <button data-room="party">Party</button>
+    <button data-room="lounge">Pantry</button>
+  </div>
+
+  <!-- Bảng thông tin khi bấm vào nhân vật -->
+  <div id="info" class="panel hidden">
+    <div class="info-head">
+      <canvas id="info-avatar" width="16" height="24"></canvas>
+      <div>
+        <div id="info-name"></div>
+        <div id="info-role"></div>
+      </div>
+      <button id="info-close" title="Đóng">✕</button>
+    </div>
+    <div id="info-activity"></div>
+    <button id="info-follow">Theo dõi</button>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "name": "ai-pixel-office",
+  "version": "0.1.0",
+  "description": "Văn phòng pixel art động với các nhân vật theo vai trò (Dev, Designer, Tester, PM, DevOps, BA)",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview --host"
+  },
+  "dependencies": {
+    "phaser": "^3.90.0"
+  },
+  "devDependencies": {
+    "vite": "^8.3.6"
+  }
+}
