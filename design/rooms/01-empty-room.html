@@ -189,11 +189,6 @@ function drawWall() {
   r(IX, wy, FW, 1, t.wallL);
   for (let x = IX + 8; x < IX + FW; x += 16) r(x, wy + 2, 1, 6, t.wall);
   r(IX, WY + ROOM.wallH - 2, FW, 2, t.woodD);
-  // bóng ở hai cạnh tường
-  r(IX, WY, 2, ROOM.wallH, t.wallD);
-  r(IX + FW - 2, WY, 2, ROOM.wallH, t.wallD);
-  brace(IX, WY, 1);
-  brace(IX + FW, WY, -1);
 }
 
 function drawFloor() {
