@@ -82,9 +82,10 @@
     const S = { night: false, bg };
 
     function clear() {
-      const c = rgb(S.night ? '#2a1c34' : S.bg);
+      const clearA = S.bg === 'transparent' ? 0 : 255;
+      const c = clearA ? rgb(S.night ? '#2a1c34' : S.bg) : [0, 0, 0];
       for (let i = 0; i < W * H; i++) {
-        main[i * 4] = c[0]; main[i * 4 + 1] = c[1]; main[i * 4 + 2] = c[2]; main[i * 4 + 3] = 255;
+        main[i * 4] = c[0]; main[i * 4 + 1] = c[1]; main[i * 4 + 2] = c[2]; main[i * 4 + 3] = clearA;
         emissive[i] = 1;
       }
       glows.length = 0;
@@ -152,7 +153,8 @@
         }
         const [r, g, b] = colors[c];
         const k = i * 4;
-        if (alpha >= 1) { main[k] = r; main[k + 1] = g; main[k + 2] = b; emissive[i] = layerEm[i]; }
+        if (alpha >= 1) { main[k] = r; main[k + 1] = g; main[k + 2] = b; main[k + 3] = 255; emissive[i] = layerEm[i]; }
+        else if (main[k + 3] === 0) { main[k] = r; main[k + 1] = g; main[k + 2] = b; main[k + 3] = Math.round(alpha * 255); }
         else { main[k] += (r - main[k]) * alpha; main[k + 1] += (g - main[k + 1]) * alpha; main[k + 2] += (b - main[k + 2]) * alpha; }
       }
       for (const i of touched) { layer[i] = -1; layerEm[i] = 0; }

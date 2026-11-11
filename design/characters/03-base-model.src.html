@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Nhân vật · Bộ khung + mặc đồ</title>
+<style>
+  body { margin: 0; background: #dbb378; color: #24120c; font-family: ui-monospace, Consolas, monospace; text-align: center; }
+  h1 { font-size: 18px; margin: 16px 0 4px; letter-spacing: 2px; }
+  h2 { font-size: 14px; margin: 20px 0 6px; }
+  .sub { font-size: 12px; opacity: .75; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; margin: 0 auto; }
+</style>
+</head>
+<body>
+  <h1>BỘ KHUNG NHÂN VẬT</h1>
+  <div class="sub">3 hướng × 3 khung (bước · đứng · bước). Hướng trái = lật gương hướng phải.</div>
+  <div id="out"></div>
+<script src="../lib/iso-engine.js"></script>
+<script src="../lib/items.js"></script>
+<script src="../lib/items-2.js"></script>
+<script src="../lib/rooms.js"></script>
+<script src="../lib/chars.js"></script>
+<script src="../lib/cast.js"></script>
+<script>
+const SK = Chars.SKIN;
+const NUDE = { eyes: ['#2a5f9e', '#4fa3d8'], top: [SK.A, SK.a, SK.b], sleeve: [SK.A, SK.a, SK.b], pants: [SK.A, SK.a, SK.b], shoes: [SK.a, SK.b], hair: ['#000', '#000', '#000'] };
+
+function sheet(title, look, K = 5) {
+  const h2 = document.createElement('h2'); h2.textContent = title; document.getElementById('out').appendChild(h2);
+  const CW = 26, W = CW * 9 + 4, H = 54;
+  const iso = Iso.createIso(W, H, { ox: 0, oy: 0, bg: '#dbb378' }); iso.clear();
+  let i = 0;
+  for (const dir of ['front', 'back', 'side']) for (let f = 0; f < 3; f++) Chars.drawFrame(iso, look, dir, f, 13 + CW * i++, H - 3);
+  const c = document.createElement('canvas'); iso.finish(c); c.style.width = W * K + 'px'; c.style.height = H * K + 'px';
+  document.getElementById('out').appendChild(c);
+}
+sheet('Khung trần', NUDE);
+if (window.CAST) for (const [name, look] of Object.entries(CAST)) sheet(name, look);
+</script>
+</body>
+</html>
