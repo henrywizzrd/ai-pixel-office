@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Phòng làm việc 4 người · Isometric</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body { background: #fad1a9; font-family: ui-monospace, Consolas, monospace; color: #4c2d54;
+         display: flex; flex-direction: column; align-items: center; transition: background .4s; }
+  body.night { background: #2a1c34; color: #f7dcd0; }
+  .bar { display: flex; gap: 6px; padding: 10px; flex-wrap: wrap; justify-content: center; }
+  button { font: inherit; font-size: 12px; padding: 5px 10px; border-radius: 4px; cursor: pointer;
+           background: #fffbf5; color: #4c2d54; border: 2px solid #4c2d54; }
+  button.on { background: #4c2d54; color: #fffbf5; }
+  #stage { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; min-height: 0; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <button id="btn-night">Ban đêm</button>
+    <button id="btn-png">Tải PNG</button>
+  </div>
+  <div id="stage"><canvas id="cv" width="480" height="360"></canvas></div>
+
+<script>
+// =====================================================================
+//  ISO PIXEL ENGINE
+//  Toạ độ thế giới (x, y, z) đơn vị pixel. Chiếu isometric 2:1:
+//    sx = OX + x - y        sy = OY + (x + y) / 2 - z
+//  Mặt "top" = mặt trên (z = z1), "left" = mặt trước-trái (y = y1),
+//  "right" = mặt trước-phải (x = x1). Ánh sáng từ trên-trái.
+// =====================================================================
+const W = 480, H = 360;
+const OX = 232, OY = 150;
+const BG = '#fad1a9';
+
+const cache = new Map();
+function rgb(hex) {
+  if (!cache.has(hex)) {
+    const n = parseInt(hex.slice(1, 7), 16);
+    cache.set(hex, [(n >> 16) & 255, (n >> 8) & 255, n & 255]);
+  }
+  return cache.get(hex);
+}
+
+let night = false;
+const main = new Uint8ClampedArray(W * H * 4);
+const emissive = new Uint8Array(W * H);       // pixel tự phát sáng (màn hình, bóng đèn)
+const layer = new Int32Array(W * H).fill(-1);  // lớp tạm của 1 đồ vật: chỉ số màu
+const layerEm = new Uint8Array(W * H);
+let touched = [];
+const colors = [];                             // bảng màu chỉ số
+const colorIdx = new Map();
+const ci = (hex) => { if (!colorIdx.has(hex)) { colorIdx.set(hex, colors.length); colors.push(rgb(hex)); } return colorIdx.get(hex); };
+
+function put(px, py, hex, em = false) {
+  if (px < 0 || py < 0 || px >= W || py >= H || !hex) return;
+  const i = py * W + px;
+  if (layer[i] === -1) touched.push(i);
+  layer[i] = ci(hex);
+  if (em) layerEm[i] = 1;
+}
+
+// Vẽ khối hộp. style: { top(lx,ly,w,d), left(lx,lz,w,h), right(ly,lz,d,h) } trả về màu hoặc null
+function box(b, style) {
+  const { x0, x1, y0, y1, z0, z1 } = b;
+  const em = !!style.emissive;
+  const sxMin = Math.floor(OX + x0 - y1) - 1, sxMax = Math.ceil(OX + x1 - y0) + 1;
+  const syMin = Math.floor(OY + (x0 + y0) / 2 - z1) - 1, syMax = Math.ceil(OY + (x1 + y1) / 2 - z0) + 1;
+  for (let py = syMin; py <= syMax; py++) for (let px = sxMin; px <= sxMax; px++) {
+    const u = px + 0.5 - OX, vy = py + 0.5 - OY;
+    // mặt trên
+    if (style.top) {
+      const v = 2 * (vy + z1);
+      const x = (u + v) / 2, y = (v - u) / 2;
+      if (x >= x0 && x < x1 && y >= y0 && y < y1) {
+        put(px, py, style.top(Math.floor(x - x0), Math.floor(y - y0), x1 - x0, y1 - y0), em && style.emTop !== false);
+        continue;
+      }
+    }
+    // mặt trước-trái (y = y1)
+    if (style.left) {
+      const x = u + y1;
+      const z = (x + y1) / 2 - vy;
+      if (x >= x0 && x < x1 && z >= z0 && z < z1) {
+        put(px, py, style.left(Math.floor(x - x0), Math.floor(z - z0), x1 - x0, z1 - z0), em);
+        continue;
+      }
+    }
+    // mặt trước-phải (x = x1)
+    if (style.right) {
+      const y = x1 - u;
+      const z = (x1 + y) / 2 - vy;
+      if (y >= y0 && y < y1 && z >= z0 && z < z1) {
+        put(px, py, style.right(Math.floor(y - y0), Math.floor(z - z0), y1 - y0, z1 - z0), em);
+      }
+    }
+  }
+}
+
+// Khối 3 màu đơn giản + viền sáng ở cạnh trước của mặt trên
+function solid(top, left, right, rim) {
+  return {
+    top: (x, y, w, d) => (rim && (x >= w - 1 || y >= d - 1) ? rim : top),
+    left: () => left,
+    right: () => right,
+  };
+}
+
+// Toạ độ thế giới → màn hình
+const proj = (x, y, z) => [Math.round(OX + x - y), Math.round(OY + (x + y) / 2 - z)];
+
+// Hình tròn/đốm vẽ thẳng trên màn hình (lá cây, cốc, bóng đèn)
+function blob(cx, cy, rx, ry, hex, em = false) {
+  for (let y = -ry; y <= ry; y++) for (let x = -rx; x <= rx; x++)
+    if ((x * x) / (rx * rx + 0.6) + (y * y) / (ry * ry + 0.6) <= 1) put(cx + x, cy + y, hex, em);
+}
+
+// Đẩy lớp tạm xuống ảnh chính, kèm viền 1px phía trong
+function commit(outline = '#372240', alpha = 1) {
+  const oc = outline ? ci(outline) : -1;
+  for (const i of touched) {
+    let c = layer[i];
+    if (oc >= 0) {
+      const x = i % W;
+      if (x === 0 || x === W - 1 || layer[i - 1] === -1 || layer[i + 1] === -1 || layer[i - W] === -1 || layer[i + W] === -1) c = oc;
+    }
+    const [r, g, b] = colors[c];
+    const k = i * 4;
+    if (alpha >= 1) { main[k] = r; main[k + 1] = g; main[k + 2] = b; emissive[i] = layerEm[i]; }
+    else { main[k] += (r - main[k]) * alpha; main[k + 1] += (g - main[k + 1]) * alpha; main[k + 2] += (b - main[k + 2]) * alpha; }
+  }
+  for (const i of touched) { layer[i] = -1; layerEm[i] = 0; }
+  touched = [];
+}
+
+// Quầng sáng (chỉ dùng ban đêm)
+const glows = [];
+function glow(x, y, rad, hex, a = 0.5) { glows.push([x, y, rad, hex, a]); }
+
+// =====================================================================
+//  BẢNG MÀU (từ design/style/palette.json)
+// =====================================================================
+const P = {
+  ink: '#372240', plum1: '#4c2d54', plum2: '#513359', plum3: '#6b4870', plum4: '#8f5d82',
+  mag0: '#520440', mag1: '#75125e', mag2: '#943672', mag3: '#a13f7d', mag4: '#c24c7d',
+  cor1: '#c65b69', cor2: '#cb5f72', cor3: '#da6f75', cor4: '#eb8379',
+  pk1: '#ebaaa2', pk2: '#ebb9b2', peach: '#fcaf7e', peach2: '#fcaf92', sand: '#fad1a9',
+  cream1: '#f7dcd0', cream2: '#fcf2e3', white: '#fffbf5',
+  mustard: '#e4d176', mint: '#6fd6a5', lime: '#d4eda9', mint2: '#3fae8a', mint3: '#2f7f6e',
+};
+
+// =====================================================================
+//  CĂN PHÒNG
+// =====================================================================
+const RX = 176, RY = 144, WH = 100, WT = 4;   // dài theo x, theo y, cao tường, dày tường
+
+function room() {
+  // tường trái (mặt phẳng x = 0), sáng màu
+  box({ x0: -WT, x1: 0, y0: -WT, y1: RY, z0: -6, z1: WH }, {
+    top: () => P.white,
+    left: (x, z) => P.pk2,                       // mặt cắt phía trước
+    right: (y, z) => {
+      if (z < 2) return P.pk1;                   // bóng chân tường
+      if (z < 22) return z === 21 ? P.white : (y % 12 === 0 ? P.pk1 : P.cream1) ;
+      if (z === 22 || z === 23) return P.pk2;
+      return P.cream2;
+    },
+  });
+  commit(P.mag1);
+  // tường phải (mặt phẳng y = 0), màu mận
+  box({ x0: 0, x1: RX, y0: -WT, y1: 0, z0: -6, z1: WH }, {
+    top: () => P.white,
+    left: (x, z) => {
+      if (z < 2) return P.ink;
+      if (z < 22) return z === 21 ? P.plum4 : (x % 12 === 0 ? P.plum1 : P.plum2);
+      if (z === 22 || z === 23) return P.plum4;
+      return P.plum3;
+    },
+    right: () => P.plum4,                        // mặt cắt phía trước
+  });
+  commit(P.ink);
+  // sàn gỗ + mép sàn dày
+  box({ x0: 0, x1: RX, y0: 0, y1: RY, z0: -6, z1: 0 }, {
+    top: (x, y) => {
+      const row = Math.floor(y / 9);
+      if (y % 9 === 0) return P.cor2;
+      const off = (row * 37) % 56;
+      if ((x + 56 - off) % 56 === 0) return P.cor2;
+      if ((x * 7 + row * 13) % 97 === 0) return P.peach2;
+      if (x < 3 || y < 3) return P.cor3;          // bóng góc tường
+      return row % 2 ? P.cor4 : '#e57d77';
+    },
+    left: (x, z) => (z === 5 ? P.cor2 : P.mag3),
+    right: (y, z) => (z === 5 ? P.mag3 : P.mag2),
+  });
+  commit(P.mag0);
+}
+
+// Vệt nắng từ cửa sổ chiếu xuống sàn
+function sunbeam(wy0, wy1) {
+  box({ x0: 1, x1: 80, y0: 0, y1: RY, z0: 0, z1: 0.01 }, {
+    top: (x, y) => { const s = x * 0.55; return y >= wy0 + s && y < wy1 + s && x > 2 ? P.white : null; },
+  });
+  commit(null, night ? 0 : 0.22);
+}
+
+// =====================================================================
+//  ĐỒ VẬT
+// =====================================================================
+const DESK = solid(P.plum3, P.plum2, P.plum1, P.plum4);
+
+function windowOnLeftWall(y0, y1, z0, z1) {
+  box({ x0: 0, x1: 1, y0, y1, z0, z1 }, {
+    right: (y, z, d, h) => {
+      if (y < 2 || y >= d - 2 || z < 2 || z >= h - 2) return P.white;
+      if (y === Math.floor(d / 2) || y === Math.floor(d / 2) - 1 || z === Math.floor(h / 2)) return P.white;
+      if (night) return z > h * 0.6 ? P.plum2 : P.plum1;
+      if ((y + z) % 11 === 0 || (y + z) % 11 === 1) return P.white;
+      return z > h * 0.55 ? P.cream2 : P.sand;
+    },
+  });
+  commit(P.mag1);
+  // bậu cửa
+  box({ x0: 0, x1: 4, y0: y0 - 1, y1: y1 + 1, z0: z0 - 2, z1: z0 }, solid(P.white, P.cream1, P.pk2));
+  commit(P.mag1);
+}
+
+function whiteboard(x0, x1, z0, z1) {
+  box({ x0, x1, y0: 0, y1: 1, z0, z1 }, {
+    left: (x, z, w, h) => {
+      if (x < 2 || x >= w - 2 || z < 2 || z >= h - 2) return P.pk1;
+      // giấy note
+      const notes = [[6, 20, P.mustard], [14, 22, P.mint], [22, 19, P.cor4], [w - 14, 21, P.mustard], [w - 22, 8, P.mint]];
+      for (const [nx, nz, c] of notes) if (x >= nx && x < nx + 6 && z >= nz && z < nz + 6) return c;
+      // biểu đồ + chữ viết
+      if (z === 12 && x > 32 && x < w - 30) return P.plum3;
+      if (z === 8 && x > 32 && x < w - 38) return P.plum4;
+      if (x > 6 && x < 28 && z < 15 && z > 4 && (x - 6) % 5 < 3 && z < 5 + ((x * 3) % 10)) return P.cor3;
+      return P.white;
+    },
+  });
+  commit(P.ink);
+  box({ x0: x0 + 4, x1: x1 - 4, y0: 0, y1: 4, z0: z0 - 2, z1: z0 }, solid(P.cream1, P.pk1, P.pk1));
+  commit(P.ink);
+}
+
+function shelfRightWall(x0, x1, z) {
+  box({ x0, x1, y0: 0, y1: 9, z0: z - 2, z1: z }, solid(P.peach2, P.cor3, P.cor1, P.pk2));
+  commit(P.mag1);
+  // sách
+  const books = [[2, 5, 16, P.mag3], [7, 4, 13, P.mustard], [11, 4, 17, P.plum4], [15, 5, 14, P.mint2], [21, 4, 12, P.cor4]];
+  for (const [dx, w, h, c] of books) { box({ x0: x0 + dx, x1: x0 + dx + w, y0: 1, y1: 8, z0: z, z1: z + h }, solid(c, c, shadeOf(c), P.white)); commit(P.ink); }
+  // cúp vàng
+  const [cx, cy] = proj(x0 + 30, 4, z + 10);
+  blob(cx, cy, 3, 3, P.mustard); put(cx, cy + 4, P.mustard); put(cx - 1, cy + 6, P.mustard); put(cx, cy + 6, P.mustard); put(cx + 1, cy + 6, P.mustard);
+  put(cx - 1, cy - 1, P.white);
+  commit(P.mag1);
+}
+
+function shadeOf(c) {
+  const map = { [P.mag3]: P.mag1, [P.mustard]: '#b8a24a', [P.plum4]: P.plum2, [P.mint2]: P.mint3, [P.cor4]: P.cor1 };
+  return map[c] || P.ink;
+}
+
+function stringLights() {
+  for (let x = 6; x < RX; x += 12) {
+    const [sx, sy] = proj(x, 0, WH - 6 - (x % 24 === 6 ? 2 : 0));
+    put(sx - 6, sy + 2, P.plum1); put(sx - 3, sy + 1, P.plum1); put(sx + 3, sy - 1, P.plum1);
+    blob(sx, sy, 1, 1, P.white, true);
+    glow(sx, sy, 7, '#fff2c0', 0.55);
+    commit(P.mag1);
+  }
+}
+
+// Bàn sát tường phải (y = 0): màn hình quay ra phía người xem
+function deskRightWall(x0, opts) {
+  const D = { x0, x1: x0 + 40, y0: 3, y1: 29, z0: 0, z1: 24 };
+  // chân + mặt bàn
+  for (const [lx, ly] of [[1, 1], [37, 1], [1, 23], [37, 23]]) { box({ x0: x0 + lx, x1: x0 + lx + 2, y0: 3 + ly, y1: 3 + ly + 2, z0: 0, z1: 21 }, solid(P.plum2, P.plum2, P.plum1)); commit(P.ink); }
+  box({ x0: x0 + 26, x1: x0 + 39, y0: 4, y1: 27, z0: 0, z1: 21 }, { top: () => P.plum3, left: (x, z) => (z === 10 ? P.plum1 : (x === 6 && (z === 5 || z === 15) ? P.plum4 : P.plum2)), right: () => P.plum1 }); // tủ ngăn kéo
+  commit(P.ink);
+  box({ ...D, z0: 21, z1: 24 }, DESK); commit(P.ink);
+  // màn hình
+  const mon = (mx0, mx1, scr) => {
+    box({ x0: mx0 + 6, x1: mx0 + 9, y0: 6, y1: 8, z0: 24, z1: 30 }, solid(P.cream1, P.pk2, P.pk1)); commit(P.mag1);
+    box({ x0: mx0, x1: mx1, y0: 6, y1: 8, z0: 28, z1: 44 }, {
+      top: () => P.white,
+      right: () => P.pk2,
+      left: (x, z, w, h) => (x < 1 || x >= w - 1 || z < 1 || z >= h - 1 ? P.cream2 : scr(x, z, w, h)),
+      emissive: true, emTop: false,
+    });
+    commit(P.mag1);
+    const [gx, gy] = proj((mx0 + mx1) / 2, 10, 36); glow(gx, gy, 16, '#8ff0ff', 0.35);
+  };
+  const code = (x, z, w, h) => {
+    const row = Math.floor((h - z) / 2);
+    if ((h - z) % 2) return P.plum1;
+    const len = [10, 6, 12, 8, 5, 11, 7][row % 7];
+    const ind = [1, 3, 3, 5, 3, 1, 3][row % 7];
+    if (x >= ind && x < ind + len && x < w - 1) return [P.mint, P.mustard, P.cor4, P.lime, P.pk2][row % 5];
+    return P.plum1;
+  };
+  const design = (x, z, w, h) => {
+    if (z > h - 4) return P.plum3;
+    if (x >= 3 && x < 10 && z >= 4 && z < 10) return P.cor4;
+    if (x >= 11 && x < w - 2 && z >= 6 && z < 10) return P.mint;
+    if (x >= 3 && x < w - 2 && z === 3) return P.mustard;
+    return P.cream1;
+  };
+  const chart = (x, z, w, h) => {
+    const bars = [4, 7, 5, 10, 8, 11];
+    const bi = Math.floor((x - 2) / 3);
+    if (x >= 2 && (x - 2) % 3 < 2 && bi < bars.length && z >= 2 && z < 2 + bars[bi]) return [P.mint, P.mustard, P.cor4][bi % 3];
+    return P.plum1;
+  };
+  const S = { code, design, chart };
+  if (opts.dual) { mon(x0 + 4, x0 + 20, S[opts.screens[0]]); mon(x0 + 21, x0 + 37, S[opts.screens[1]]); }
+  else mon(x0 + 12, x0 + 30, S[opts.screens[0]]);
+  // bàn phím + chuột
+  box({ x0: x0 + 10, x1: x0 + 30, y0: 15, y1: 20, z0: 24, z1: 25 }, { top: (x, y) => (x % 2 === 0 && y % 2 === 1 ? P.pk2 : P.white), left: () => P.pk1, right: () => P.pk1 });
+  commit(P.mag1);
+  box({ x0: x0 + 33, x1: x0 + 36, y0: 16, y1: 20, z0: 24, z1: 25 }, solid(P.white, P.pk1, P.pk1)); commit(P.mag1);
+  // đồ cá nhân
+  if (opts.mug) mug(x0 + 4, 20, 24, opts.mug);
+  if (opts.plant) deskPlant(x0 + 35, 8, 24);
+  if (opts.papers) { box({ x0: x0 + 2, x1: x0 + 9, y0: 10, y1: 18, z0: 24, z1: 25 }, { top: (x, y) => (y % 3 === 1 && x > 0 && x < 6 ? P.pk2 : P.white), left: () => P.cream1, right: () => P.cream1 }); commit(P.mag1); }
+  if (opts.lamp) deskLamp(x0 + 2, 7, 24);
+  // ghế (quay lưng về người xem)
+  chairFacingBack(x0 + 12, 36);
+}
+
+// Bàn sát tường trái (x = 0): màn hình hướng +x
+function deskLeftWall(y0, opts) {
+  for (const [lx, ly] of [[1, 1], [23, 1], [1, 37], [23, 37]]) { box({ x0: 3 + lx, x1: 3 + lx + 2, y0: y0 + ly, y1: y0 + ly + 2, z0: 0, z1: 21 }, solid(P.plum2, P.plum2, P.plum1)); commit(P.ink); }
+  box({ x0: 4, x1: 27, y0: y0 + 26, y1: y0 + 39, z0: 0, z1: 21 }, { top: () => P.plum3, left: () => P.plum2, right: (y, z) => (z === 10 ? P.ink : (y === 6 && (z === 5 || z === 15) ? P.plum3 : P.plum1)) });
+  commit(P.ink);
+  box({ x0: 3, x1: 29, y0, y1: y0 + 40, z0: 21, z1: 24 }, DESK); commit(P.ink);
+  const scr = opts.screen;
+  const mon = (my0, my1) => {
+    box({ x0: 6, x1: 8, y0: my0 + 6, y1: my0 + 9, z0: 24, z1: 30 }, solid(P.cream1, P.pk2, P.pk1)); commit(P.mag1);
+    box({ x0: 6, x1: 8, y0: my0, y1: my1, z0: 28, z1: 44 }, {
+      top: () => P.white, left: () => P.pk2,
+      right: (y, z, d, h) => {
+        if (y < 1 || y >= d - 1 || z < 1 || z >= h - 1) return P.cream2;
+        const row = Math.floor((h - z) / 2);
+        if ((h - z) % 2 || scr === 'off') return P.plum1;
+        const len = [9, 5, 11, 7, 4, 10][row % 6];
+        return y >= 2 && y < 2 + len && y < d - 1 ? [P.mint, P.mustard, P.cor4, P.lime][row % 4] : P.plum1;
+      },
+      emissive: true, emTop: false,
+    });
+    commit(P.mag1);
+    const [gx, gy] = proj(12, (my0 + my1) / 2, 36); glow(gx, gy, 16, '#8ff0ff', 0.35);
+  };
+  if (opts.laptop) {
+    // laptop mở
+    box({ x0: 11, x1: 21, y0: y0 + 12, y1: y0 + 28, z0: 24, z1: 25 }, solid(P.pk2, P.pk1, P.pk1)); commit(P.mag1);
+    box({ x0: 10, x1: 11, y0: y0 + 12, y1: y0 + 28, z0: 25, z1: 36 }, { top: () => P.pk2, left: () => P.pk1, right: (y, z, d, h) => (y < 1 || y >= d - 1 || z < 1 || z >= h - 1 ? P.pk2 : (z > 5 && y > 3 && y < 12 && (z % 3 === 0) ? P.mint : P.plum1)), emissive: true, emTop: false });
+    commit(P.mag1);
+    const [gx, gy] = proj(14, y0 + 20, 30); glow(gx, gy, 12, '#8ff0ff', 0.3);
+  } else mon(y0 + 10, y0 + 30);
+  box({ x0: 13, x1: 18, y0: y0 + 10, y1: y0 + 30, z0: 24, z1: 25 }, { top: (x, y) => (x % 2 === 1 && y % 2 === 0 ? P.pk2 : P.white), left: () => P.pk1, right: () => P.pk1 });
+  if (!opts.laptop) commit(P.mag1); else { touched.forEach((i) => { layer[i] = -1; }); touched = []; }
+  if (opts.mug) mug(20, y0 + 34, 24, opts.mug);
+  if (opts.plant) deskPlant(9, y0 + 4, 24);
+  if (opts.books) { for (let k = 0; k < 3; k++) { box({ x0: 18, x1: 26, y0: y0 + 2, y1: y0 + 8, z0: 24 + k * 2, z1: 26 + k * 2 }, solid([P.mag3, P.mustard, P.mint2][k], [P.mag1, '#b8a24a', P.mint3][k], [P.mag1, '#b8a24a', P.mint3][k], P.white)); commit(P.ink); } }
+  chairFacingLeftWall(32, y0 + 12);
+}
+
+function mug(x, y, z, col) {
+  box({ x0: x, x1: x + 4, y0: y, y1: y + 4, z0: z, z1: z + 5 }, { top: (a, b) => (a > 0 && b > 0 && a < 3 && b < 3 ? '#7a3b2a' : P.white), left: () => col, right: () => shadeOf(col) === P.ink ? P.cor1 : shadeOf(col) });
+  commit(P.mag1);
+  const [sx, sy] = proj(x + 4, y + 2, z + 3); put(sx + 1, sy - 1, col); put(sx + 2, sy, col); put(sx + 1, sy + 1, col); commit(P.mag1);
+}
+
+function deskPlant(x, y, z) {
+  box({ x0: x, x1: x + 5, y0: y, y1: y + 5, z0: z, z1: z + 5 }, solid('#7a3b2a', P.cor4, P.cor1, P.peach)); commit(P.mag1);
+  const [sx, sy] = proj(x + 2.5, y + 2.5, z + 5);
+  blob(sx, sy - 3, 3, 3, P.mint2); blob(sx - 2, sy - 5, 2, 2, P.mint); blob(sx + 2, sy - 6, 2, 2, P.mint); put(sx, sy - 8, P.lime);
+  commit(P.mint3);
+}
+
+function deskLamp(x, y, z) {
+  box({ x0: x, x1: x + 5, y0: y, y1: y + 5, z0: z, z1: z + 1 }, solid(P.mustard, '#b8a24a', '#b8a24a')); commit(P.mag1);
+  const [bx, by] = proj(x + 2, y + 2, z + 1);
+  for (let k = 0; k < 9; k++) put(bx + (k > 5 ? k - 5 : 0), by - k, P.plum2);
+  blob(bx + 5, by - 9, 3, 2, P.mustard); put(bx + 5, by - 7, P.white, true);
+  commit(P.mag1);
+  glow(bx + 5, by - 6, 22, '#ffd27a', 0.5);
+}
+
+// Ghế văn phòng màu kem, lưng quay về người xem (ngồi nhìn tường phải)
+function chairFacingBack(x0, y0) {
+  const C = solid(P.white, P.cream1, P.pk2, P.white);
+  box({ x0: x0 + 6, x1: x0 + 10, y0: y0 + 5, y1: y0 + 9, z0: 2, z1: 12 }, solid(P.plum2, P.plum2, P.plum1)); commit(P.ink);
+  box({ x0: x0 + 1, x1: x0 + 15, y0: y0 + 6, y1: y0 + 8, z0: 0, z1: 2 }, solid(P.plum3, P.plum2, P.plum1)); commit(P.ink);
+  box({ x0: x0 + 7, x1: x0 + 9, y0: y0, y1: y0 + 14, z0: 0, z1: 2 }, solid(P.plum3, P.plum2, P.plum1)); commit(P.ink);
+  box({ x0, x1: x0 + 16, y0, y1: y0 + 14, z0: 12, z1: 15 }, C); commit(P.mag1);
+  box({ x0: x0 + 1, x1: x0 + 15, y0: y0 + 12, y1: y0 + 15, z0: 15, z1: 33 }, { top: () => P.white, left: (x, z) => (z > 14 && x > 2 && x < 12 ? P.cream2 : P.cream1), right: () => P.pk2 }); commit(P.mag1);
+}
+
+// Ghế quay lưng về phía +x (ngồi nhìn tường trái)
+function chairFacingLeftWall(x0, y0) {
+  const C = solid(P.white, P.cream1, P.pk2, P.white);
+  box({ x0: x0 + 5, x1: x0 + 9, y0: y0 + 6, y1: y0 + 10, z0: 2, z1: 12 }, solid(P.plum2, P.plum2, P.plum1)); commit(P.ink);
+  box({ x0: x0 + 6, x1: x0 + 8, y0: y0 + 1, y1: y0 + 15, z0: 0, z1: 2 }, solid(P.plum3, P.plum2, P.plum1)); commit(P.ink);
+  box({ x0, x1: x0 + 14, y0: y0 + 7, y1: y0 + 9, z0: 0, z1: 2 }, solid(P.plum3, P.plum2, P.plum1)); commit(P.ink);
+  box({ x0, x1: x0 + 14, y0, y1: y0 + 16, z0: 12, z1: 15 }, C); commit(P.mag1);
+  box({ x0: x0 + 12, x1: x0 + 15, y0: y0 + 1, y1: y0 + 15, z0: 15, z1: 33 }, { top: () => P.white, left: () => P.cream1, right: (y, z) => (z > 14 && y > 2 && y < 12 ? P.cream1 : P.pk2) }); commit(P.mag1);
+}
+
+function bigPlant(x, y) {
+  box({ x0: x, x1: x + 14, y0: y, y1: y + 14, z0: 0, z1: 14 }, { top: (a, b) => (a > 1 && b > 1 && a < 12 && b < 12 ? '#7a3b2a' : P.white), left: (a, z) => (z === 10 ? P.cor4 : P.white), right: (a, z) => (z === 10 ? P.cor1 : P.cream1) });
+  commit(P.mag1);
+  const [sx, sy] = proj(x + 7, y + 7, 14);
+  const leaves = [[0, -10, 7, 6], [-7, -6, 5, 4], [7, -7, 5, 4], [-4, -18, 5, 5], [5, -17, 5, 5], [0, -25, 4, 5], [-8, -14, 4, 3], [9, -13, 3, 3]];
+  for (const [dx, dy, rx, ry] of leaves) blob(sx + dx, sy + dy, rx, ry, P.mint2);
+  for (const [dx, dy, rx, ry] of leaves) blob(sx + dx - 1, sy + dy - 1, rx - 2, ry - 2, P.mint);
+  for (const [dx, dy] of leaves) put(sx + dx - 2, sy + dy - 2, P.lime);
+  commit(P.mint3);
+}
+
+function bookcase(x0, x1, y0, y1, h) {
+  box({ x0, x1, y0, y1, z0: 0, z1: h }, {
+    top: () => P.white,
+    right: () => P.pk2,
+    left: (x, z, w, hh) => {
+      if (x < 2 || x >= w - 2 || z < 2 || z >= hh - 2) return P.cream2;
+      const shelf = Math.floor((z - 2) / 16);
+      const zz = (z - 2) % 16;
+      if (zz < 2) return P.cream1;
+      const cols = [P.mag3, P.plum3, P.mustard, P.cor4, P.mint2, P.plum4, P.pk2];
+      const bw = 3 + ((x + shelf) % 2);
+      const bi = Math.floor((x - 2 + shelf * 5) / bw);
+      const bh = 9 + ((bi * 7 + shelf) % 5);
+      if (zz < 2 + bh && (shelf + bi) % 6 !== 5) return (x - 2 + shelf * 5) % bw === 0 ? P.ink : cols[(bi + shelf * 3) % cols.length];
+      return P.plum1;
+    },
+  });
+  commit(P.mag1);
+}
+
+function printerCabinet(x0, y0) {
+  box({ x0, x1: x0 + 22, y0, y1: y0 + 18, z0: 0, z1: 20 }, { top: () => P.peach2, left: (x, z) => (z === 9 ? P.cor1 : (x === 10 && (z === 4 || z === 14) ? P.white : P.cor4)), right: () => P.cor1 });
+  commit(P.mag1);
+  box({ x0: x0 + 2, x1: x0 + 20, y0: y0 + 2, y1: y0 + 16, z0: 20, z1: 30 }, { top: (x, y) => (y > 3 && y < 10 && x > 3 && x < 14 ? P.cream1 : P.white), left: (x, z) => (z === 4 ? P.plum2 : (x > 12 && z === 7 ? P.mint : P.cream2)), right: () => P.pk2 });
+  commit(P.mag1);
+  box({ x0: x0 + 6, x1: x0 + 14, y0: y0 + 4, y1: y0 + 10, z0: 30, z1: 31 }, solid(P.white, P.cream1, P.cream1)); commit(P.mag1);
+}
+
+function waterCooler(x0, y0) {
+  box({ x0, x1: x0 + 12, y0, y1: y0 + 12, z0: 0, z1: 24 }, { top: () => P.white, left: (x, z) => (z > 16 && z < 19 && (x === 3 || x === 8) ? (x === 3 ? P.cor4 : P.mint) : P.cream2), right: () => P.cream1 });
+  commit(P.mag1);
+  box({ x0: x0 + 2, x1: x0 + 10, y0: y0 + 2, y1: y0 + 10, z0: 24, z1: 38 }, { top: () => P.lime, left: (x, z) => (x === 2 ? P.white : P.mint), right: () => P.mint2 });
+  commit(P.mint3, 1);
+}
+
+function rug(x0, x1, y0, y1) {
+  box({ x0, x1, y0, y1, z0: 0, z1: 1 }, {
+    top: (x, y, w, d) => {
+      if (x < 3 || y < 3 || x >= w - 3 || y >= d - 3) return P.plum3;
+      if (x === 3 || y === 3 || x === w - 4 || y === d - 4) return P.pk2;
+      // hoa văn kẻ ô theo trục iso + hình thoi ở giữa
+      if (x > 8 && x < w - 9 && y > 8 && y < d - 9) {
+        if (y % 16 < 2) return P.pk2;
+        if (x % 16 < 2) return P.plum3;
+        const cx = Math.abs(x - w / 2), cy = Math.abs(y - d / 2);
+        if (Math.abs(cx + cy - 22) < 2) return P.mustard;
+      }
+      return P.plum4;
+    },
+    left: () => P.plum2, right: () => P.plum1,
+  });
+  commit(P.ink);
+}
+
+function sideTable(x0, y0) {
+  box({ x0, x1: x0 + 24, y0, y1: y0 + 18, z0: 12, z1: 15 }, solid(P.peach2, P.cor4, P.cor1, P.sand)); commit(P.mag1);
+  for (const [lx, ly] of [[1, 1], [21, 1], [1, 15], [21, 15]]) { box({ x0: x0 + lx, x1: x0 + lx + 2, y0: y0 + ly, y1: y0 + ly + 2, z0: 0, z1: 12 }, solid(P.white, P.white, P.cream1)); commit(P.mag1); }
+  // đĩa bánh + cốc + tay cầm game
+  const [px, py] = proj(x0 + 9, y0 + 9, 15);
+  blob(px, py, 6, 3, P.white); blob(px - 2, py - 1, 2, 1, P.cor3); blob(px + 2, py, 2, 1, P.peach); blob(px, py - 2, 2, 1, P.mag3);
+  commit(P.mag1);
+  mug(x0 + 17, y0 + 3, 15, P.mint2);
+}
+
+function backpack(x0, y0) {
+  box({ x0, x1: x0 + 10, y0, y1: y0 + 7, z0: 0, z1: 12 }, { top: () => P.cor4, left: (x, z) => (z > 3 && z < 7 && x > 2 && x < 8 ? P.cor3 : P.mag4), right: () => P.mag2 });
+  commit(P.mag0);
+}
+
+function trashBin(x0, y0) {
+  box({ x0, x1: x0 + 7, y0, y1: y0 + 7, z0: 0, z1: 9 }, { top: (a, b) => (a > 0 && b > 0 && a < 6 && b < 6 ? P.cream1 : P.plum3), left: (x) => (x % 2 ? P.plum3 : P.plum2), right: (y) => (y % 2 ? P.plum2 : P.plum1) });
+  commit(P.ink);
+}
+
+function wallClock(y, z) {
+  const [sx, sy] = proj(0, y, z);
+  blob(sx + 1, sy, 4, 5, P.white); put(sx + 1, sy - 2, P.plum1); put(sx + 1, sy - 1, P.plum1); put(sx + 2, sy, P.plum1); put(sx + 1, sy, P.cor4);
+  commit(P.mag1);
+}
+
+function poster(y0, y1, z0, z1) {
+  box({ x0: 0, x1: 1, y0, y1, z0, z1 }, {
+    right: (y, z, d, h) => {
+      if (y < 2 || y >= d - 2 || z < 2 || z >= h - 2) return P.plum2;
+      if (z < h * 0.45) return P.cor4;
+      if (Math.abs(y - d / 2) * 1.2 < z - h * 0.45 + 2 && z < h - 6) return P.peach;
+      return P.mag3;
+    },
+  });
+  commit(P.ink);
+}
+
+function sock(x, y) {
+  const [sx, sy] = proj(x, y, 0);
+  for (const [dx, dy] of [[0, 0], [1, 0], [2, 0], [3, 1], [4, 1], [5, 1], [5, 0], [6, 0], [1, -1], [2, -1]]) put(sx + dx, sy + dy, P.white);
+  put(sx + 6, sy - 1, P.mint);
+  commit(P.pk1);
+}
+
+// =====================================================================
+//  DỰNG CẢNH
+// =====================================================================
+function render() {
+  glows.length = 0;
+  const bg = rgb(night ? '#2a1c34' : BG);
+  for (let i = 0; i < W * H; i++) { main[i * 4] = bg[0]; main[i * 4 + 1] = bg[1]; main[i * 4 + 2] = bg[2]; main[i * 4 + 3] = 255; emissive[i] = 1; }  // nền không bị làm tối
+
+  room();
+  // trên tường
+  windowOnLeftWall(48, 80, 44, 80);
+  windowOnLeftWall(100, 132, 44, 80);
+  poster(14, 34, 46, 74);
+  wallClock(140, 84);
+  whiteboard(30, 102, 52, 84);
+  shelfRightWall(128, 168, 76);
+  stringLights();
+
+  sunbeam(48, 80);
+  sunbeam(100, 132);
+  rug(54, 150, 52, 128);
+
+  // theo thứ tự xa → gần
+  bigPlant(4, 4);
+  deskRightWall(26, { dual: true, screens: ['code', 'chart'], mug: P.cor4, plant: true });
+  bookcase(132, 172, 2, 14, 64);
+  deskLeftWall(30, { screen: 'code', mug: P.mustard, plant: true, books: true });
+  deskRightWall(80, { dual: false, screens: ['design'], papers: true, lamp: true, mug: P.mint2 });
+  printerCabinet(148, 30);
+  deskLeftWall(86, { laptop: true, mug: P.cor4 });
+  sideTable(90, 78);
+  trashBin(70, 8);
+  backpack(56, 108);
+  waterCooler(156, 120);
+  sock(118, 120);
+
+  // ban đêm: tối dần trừ pixel tự phát sáng, rồi cộng quầng sáng
+  if (night) {
+    const tint = rgb('#5a4a8c');
+    for (let i = 0; i < W * H; i++) {
+      if (emissive[i]) continue;
+      const k = i * 4;
+      main[k] = (main[k] * tint[0]) / 255; main[k + 1] = (main[k + 1] * tint[1]) / 255; main[k + 2] = (main[k + 2] * tint[2]) / 255;
+    }
+    for (const [gx, gy, rad, hex, a] of glows) {
+      const [r, g, b] = rgb(hex);
+      for (let y = -rad; y <= rad; y++) for (let x = -rad; x <= rad; x++) {
+        const d = Math.sqrt(x * x + y * y) / rad;
+        if (d > 1) continue;
+        const px = gx + x, py = gy + y;
+        if (px < 0 || py < 0 || px >= W || py >= H) continue;
+        // ánh sáng bậc thang (pixel-art) thay vì mịn
+        const s = a * (d < 0.35 ? 0.6 : d < 0.7 ? 0.35 : 0.15);
+        const k = (py * W + px) * 4;
+        main[k] = Math.min(255, main[k] + r * s); main[k + 1] = Math.min(255, main[k + 1] + g * s); main[k + 2] = Math.min(255, main[k + 2] + b * s);
+      }
+    }
+  }
+
+  const ctx = document.getElementById('cv').getContext('2d');
+  ctx.putImageData(new ImageData(new Uint8ClampedArray(main), W, H), 0, 0);
+  document.body.classList.toggle('night', night);
+  document.body.style.background = night ? '#2a1c34' : BG;
+}
+
+// =====================================================================
+//  GIAO DIỆN
+// =====================================================================
+const cv = document.getElementById('cv');
+function fit() {
+  const st = document.getElementById('stage').getBoundingClientRect();
+  const s = Math.max(1, Math.floor(Math.min(st.width / W, st.height / H)));
+  cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+}
+document.getElementById('btn-night').onclick = (e) => { night = !night; e.target.classList.toggle('on', night); render(); };
+document.getElementById('btn-png').onclick = () => {
+  const o = document.createElement('canvas'); o.width = W * 4; o.height = H * 4;
+  const g = o.getContext('2d'); g.imageSmoothingEnabled = false; g.drawImage(cv, 0, 0, o.width, o.height);
+  const a = document.createElement('a'); a.download = night ? 'phong-lam-viec-dem.png' : 'phong-lam-viec.png'; a.href = o.toDataURL(); a.click();
+};
+window.addEventListener('resize', fit);
+render(); fit();
+</script>
+</body>
+</html>
