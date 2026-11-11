@@ -112,7 +112,8 @@ function tick(now) {
   const t = (now - t0) / 1000;
   const iso = Iso.createIso(W, H, { ox: OX, oy: OY, bg: 'transparent' }); iso.S.night = night; iso.clear();
   const s = walkerAt(t);
-  drawSprite(iso, EMPLOYEE[s.dir], s.moving ? Math.floor(t * 7) % 4 : 4, Math.round(s.x), Math.round(s.y));
+  const spr = EMPLOYEE[s.dir], n = spr.frames.length - 1;          // frame cuối = đứng yên
+  drawSprite(iso, spr, s.moving ? Math.floor(t * 8) % n : n, Math.round(s.x), Math.round(s.y));
   iso.finish(layer);
   ctx.clearRect(0, 0, W, H); ctx.drawImage(bg, 0, 0); ctx.drawImage(layer, 0, 0);
   requestAnimationFrame(tick);
