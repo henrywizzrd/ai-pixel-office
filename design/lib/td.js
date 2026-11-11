@@ -174,13 +174,30 @@
   }
 
   // Ghế xoay nhìn từ phía sau (người ngồi quay mặt vào bàn phía trên)
+  // Ghế xoay nhìn từ phía sau (theo ảnh mẫu): lưng cao bo tròn, tựa đầu sáng,
+  // thân lưng lưới đan caro, đệm lưng sáng ở dưới, 2 tay vịn sẫm, 2 chân ghế
   function chair(iso, x, y, col = 'dark') {
     const { R, P, done, shade } = kit(iso);
-    const m = col === 'brown' ? { a: '#c7754b', b: '#b35e3f', c: '#ab4a36' } : { a: C.darkL, b: C.dark, c: C.darkD };
-    shade(x + 1, y + 16, 16, 3);
-    R(x + 2, y + 14, 14, 2, C.darkD); R(x + 7, y + 12, 4, 4, C.darkD);
-    R(x + 1, y, 16, 13, m.c); R(x + 2, y + 1, 14, 11, m.b); R(x + 3, y + 1, 12, 2, m.a);
-    for (let k = 0; k < 4; k++) R(x + 4 + k * 3, y + 5, 1, 5, m.c);
+    const m = col === 'brown'
+      ? { hi: '#c7754b', a: '#b35e3f', b: '#a8583c', d: '#8a4632', arm: '#6b3a2a' }
+      : { hi: '#7e8099', a: '#6c6e85', b: '#60637d', d: '#565972', arm: '#3a3a50' };
+    shade(x + 2, y + 19, 15, 3);
+    // 2 chân ghế
+    R(x + 3, y + 17, 3, 3, m.arm); R(x + 10, y + 17, 3, 3, m.arm); P(x + 4, y + 17, m.d); P(x + 11, y + 17, m.d);
+    // tay vịn
+    R(x, y + 8, 2, 8, m.arm); R(x + 14, y + 8, 2, 8, m.arm); P(x + 1, y + 8, m.d); P(x + 14, y + 8, m.d);
+    // lưng ghế
+    R(x + 2, y + 1, 12, 15, m.d);
+    R(x + 3, y, 10, 1, m.d);
+    // tựa đầu: dải sáng + vạch tối bên dưới
+    R(x + 3, y + 1, 10, 2, m.hi); R(x + 2, y + 3, 12, 1, m.d);
+    // thân lưng: lưới đan caro
+    for (let j = 4; j < 10; j++) for (let i = 3; i < 13; i++) P(x + i, y + j, (i + j) % 2 ? m.a : m.b);
+    R(x + 2, y + 10, 12, 1, m.d);
+    // đệm lưng
+    R(x + 4, y + 11, 8, 3, m.a); R(x + 4, y + 11, 8, 1, m.hi);
+    // mép đáy ghế
+    R(x + 2, y + 14, 12, 2, m.d); R(x + 3, y + 15, 10, 1, m.arm);
     done();
   }
 
@@ -207,31 +224,59 @@
     // đồ trên bàn
     const it = opts.items || ['crt', 'phone', 'lamp'];
     const by = y + 14;
-    if (it.includes('crt')) crt(iso, x + 17, by - 4, opts.screen);
-    if (it.includes('dual')) { crt(iso, x + 6, by - 4, 'code'); crt(iso, x + 24, by - 4, opts.screen); }
-    if (it.includes('laptop')) laptop(iso, x + 6, by + 3);
-    if (it.includes('phone')) phone(iso, x + 5, by + 2);
+    const hasLap = it.includes('laptop');
+    if (hasLap) laptop(iso, x + 3, by - 4);
+    if (it.includes('crt')) crt(iso, hasLap ? x + 21 : x + 15, by - 4, opts.screen);
+    if (it.includes('dual')) { crt(iso, x + 5, by - 4, 'code'); crt(iso, x + 24, by - 4, opts.screen); }
+    if (it.includes('phone') && !hasLap) phone(iso, x + 3, by + 3);
     if (it.includes('lamp')) lamp(iso, x + 36, by - 6);
     if (it.includes('papers')) papers(iso, x + 34, by + 7);
     if (it.includes('mug')) mug(iso, x + 38, by + 2);
     if (it.includes('photo')) photo(iso, x + 36, by - 2);
-    keyboard(iso, x + 14, by + 10);
+    keyboard(iso, hasLap ? x + 19 : x + 13, by + 11);
   }
-  function crt(iso, x, y, kind = 'blue') {
+  // Màn hình (theo ảnh mẫu): viền xám 2 lớp, màn xanh sáng có taskbar,
+  // cột icon bên trái (xanh / đỏ / vàng), lưới 2×3 ô trắng bên phải, cổ ngắn + đế rộng
+  const SCR = { bg: '#4280dd', bar: '#1652b9', icon: '#4995e3', tile: '#d8d0e0' };
+  function screenContent(iso, x, y, w, h, kind) {
+    const { R, P } = kit(iso);
+    R(x, y, w, h, SCR.bg);
+    R(x, y + h - 1, w, 1, SCR.bar);
+    if (kind === 'code') {
+      R(x, y, w, h - 1, '#26304a');
+      for (let r = 0; r < Math.floor((h - 1) / 2); r++) R(x + 1 + (r % 2), y + 1 + r * 2, Math.min(w - 2, 4 + ((r * 3) % 5)), 1, ['#64b63b', '#f8d239', '#d8d0e0', '#4995e3'][r % 4]);
+      return;
+    }
+    for (let r = 0; r < Math.min(3, h - 1); r++) P(x + 1, y + 1 + r * 2 - (r === 2 ? 1 : 0), SCR.icon);
+    P(x + 3, y + 1, '#d93232'); P(x + 3, y + 3, '#f8d239');
+    for (let r = 0; r < 3 && 1 + r * 2 < h - 1; r++) { P(x + w - 4, y + 1 + r * 2, SCR.tile); P(x + w - 2, y + 1 + r * 2, SCR.tile); }
+  }
+  function crt(iso, x, y, kind = 'desktop') {
     const { R, P, done } = kit(iso);
-    R(x + 4, y + 15, 8, 3, C.bezel); R(x + 2, y + 17, 12, 2, C.metal);
-    R(x, y, 16, 15, C.bezel); R(x + 1, y + 1, 14, 1, C.darkL);
-    R(x + 2, y + 2, 12, 10, C.scr); R(x + 2, y + 2, 12, 1, C.scrL);
-    if (kind === 'code') for (let r = 0; r < 4; r++) R(x + 3 + (r % 2), y + 4 + r * 2, 6 + ((r * 3) % 5), 1, [C.green, C.yellow, C.white, C.scrL][r]);
-    else { P(x + 4, y + 5, C.red); P(x + 6, y + 5, C.yellow); P(x + 9, y + 5, C.white); P(x + 11, y + 5, C.white); P(x + 9, y + 8, C.white); P(x + 11, y + 8, C.white); R(x + 4, y + 8, 3, 2, C.scrL); }
+    // đế + cổ
+    R(x + 4, y + 13, 10, 2, '#565972'); R(x + 4, y + 13, 10, 1, '#6c6e85');
+    R(x + 7, y + 11, 4, 2, '#565972'); R(x + 8, y + 11, 2, 1, '#6c6e85');
     done();
-    iso.glow(x + 8, y + 7, 12, '#4995e3', 0.35);
+    // vỏ màn hình
+    R(x, y, 18, 12, '#60637d'); R(x + 1, y + 1, 16, 1, '#6c6e85'); R(x + 1, y + 10, 16, 1, '#565972');
+    screenContent(iso, x + 2, y + 2, 14, 8, kind);
+    done();
+    iso.glow(x + 9, y + 6, 12, '#4995e3', 0.35);
   }
+  // Laptop (theo ảnh mẫu): nắp viền xám nhạt + màn xanh, thân có bàn phím caro + touchpad sẫm
   function laptop(iso, x, y) {
-    const { R, done } = kit(iso);
-    R(x, y, 14, 10, C.metal); R(x + 1, y + 1, 12, 7, C.metalD); R(x + 2, y + 2, 10, 5, C.scr); R(x + 2, y + 2, 10, 1, C.scrL);
-    R(x, y + 10, 14, 4, C.part); R(x + 1, y + 11, 12, 2, C.partD);
+    const { R, P, done } = kit(iso);
+    // nắp
+    R(x, y, 14, 9, '#acafbf'); R(x + 1, y + 1, 12, 1, '#b9c3d5');
+    screenContent(iso, x + 2, y + 2, 10, 6, 'desktop');
+    R(x, y + 9, 14, 1, '#565972');
     done();
+    // thân + bàn phím caro
+    R(x, y + 10, 14, 8, '#b9c3d5'); R(x + 1, y + 10, 12, 1, '#d4dee6');
+    for (let j = 0; j < 2; j++) for (let i = 0; i < 10; i++) P(x + 2 + i, y + 12 + j, (i + j) % 2 ? '#f8f8f8' : '#9e9e9f');
+    R(x + 5, y + 15, 4, 2, '#565972'); R(x + 1, y + 15, 3, 1, '#d4dee6');
+    done();
+    iso.glow(x + 7, y + 5, 10, '#4995e3', 0.3);
   }
   function keyboard(iso, x, y) {
     const { R, P, done } = kit(iso);
