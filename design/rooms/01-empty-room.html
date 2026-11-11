@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bước 1 · Phòng trống</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: #4a2418; color: #f3d9b8;
+    font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  header { text-align: center; padding: 14px 10px 4px; }
+  h1 { margin: 0; font-size: 18px; letter-spacing: 3px; color: #e8a96a; }
+  .sub { font-size: 12px; opacity: .75; margin-top: 4px; }
+  .controls { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; padding: 8px; }
+  button, select {
+    font: inherit; font-size: 12px; color: #f3d9b8; background: #6b3a24;
+    border: 2px solid #9a5a36; border-radius: 3px; padding: 5px 9px; cursor: pointer;
+  }
+  button.on { background: #e8a96a; color: #3a1c12; border-color: #ffcf98; }
+  #stage { position: relative; flex: 1; width: 100%; display: flex; align-items: center; justify-content: center; min-height: 0; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
+  #wrap { position: relative; }
+  #grid { position: absolute; inset: 0; pointer-events: none; }
+  #tip {
+    position: fixed; pointer-events: none; display: none;
+    background: #2a140c; border: 2px solid #9a5a36; padding: 3px 6px; font-size: 12px; border-radius: 3px;
+  }
+  footer { font-size: 11px; opacity: .6; padding: 6px 10px 12px; text-align: center; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>AI PIXEL OFFICE</h1>
+    <div class="sub">Bước 1: Phòng trống (10 × 7 ô sàn, mỗi ô 16px)</div>
+  </header>
+
+  <div class="controls">
+    <select id="theme" title="Kiểu phòng">
+      <option value="warm">Gỗ ấm</option>
+      <option value="modern">Văn phòng hiện đại</option>
+      <option value="moss">Xanh rêu</option>
+    </select>
+    <button id="btn-grid">Lưới ô</button>
+    <button id="btn-night">Ban đêm</button>
+    <button id="btn-png">Tải PNG</button>
+  </div>
+
+  <div id="stage"><div id="wrap"><canvas id="room"></canvas><canvas id="grid"></canvas></div></div>
+  <div id="tip"></div>
+  <footer>Rê chuột (hoặc chạm) lên phòng để xem toạ độ ô. Những ô này sẽ dùng để đặt đồ vật ở các bước sau.</footer>
+
+<script>
+// =====================================================================
+//  CẤU HÌNH PHÒNG — đổi số ô ở đây là phòng tự to/nhỏ theo
+// =====================================================================
+const TILE = 16;
+const ROOM = {
+  cols: 10,        // số ô sàn theo chiều ngang
+  rows: 7,         // số ô sàn theo chiều dọc
+  wallH: 32,       // chiều cao tường sau (px)
+  frame: 8,        // độ dày khung gỗ hai bên + dưới
+  top: 10,         // độ dày xà gỗ phía trên
+  door: { col: 4, width: 2 }, // cửa ở cạnh dưới: bắt đầu từ ô số 4, rộng 2 ô
+};
+const MARGIN = 16;
+
+// Bảng màu cho từng kiểu phòng (sau này mỗi phòng trong công ty chọn 1 kiểu)
+const THEMES = {
+  warm: {
+    bg: '#4a2418',
+    wood: '#8f5a33', woodL: '#b57a46', woodD: '#5f3a21', woodK: '#3a2216',
+    wall: '#dba37b', wallD: '#c38a63', wallL: '#ebbf98', wallPattern: 'plain',
+    floor: ['#a8744d', '#9d6b46'], floorSeam: '#7a4d31', floorL: '#b98459', floorPattern: 'planks',
+    mat: '#b8432f', matD: '#8e2f20',
+  },
+  modern: {
+    bg: '#23222b',
+    wood: '#5d6170', woodL: '#7d8294', woodD: '#3f424e', woodK: '#25272f',
+    wall: '#e9e4da', wallD: '#d3cdc0', wallL: '#f6f2ea', wallPattern: 'plain',
+    floor: ['#9aa1ab', '#939aa4'], floorSeam: '#7b828c', floorL: '#adb4bd', floorPattern: 'tiles',
+    mat: '#3f6fb5', matD: '#2c5088',
+  },
+  moss: {
+    bg: '#141812',
+    wood: '#7a4a2c', woodL: '#9c6440', woodD: '#4f2f1b', woodK: '#2a1a10',
+    wall: '#3d5a46', wallD: '#2f4737', wallL: '#4c6c55', wallPattern: 'stripes',
+    floor: ['#9a5a34', '#8f532f'], floorSeam: '#6a3c22', floorL: '#ad6a40', floorPattern: 'planks',
+    mat: '#5a3a7a', matD: '#3e2757',
+  },
+};
+
+// =====================================================================
+//  CÁC KÍCH THƯỚC SUY RA
+// =====================================================================
+const FW = ROOM.cols * TILE;                       // rộng sàn
+const FH = ROOM.rows * TILE;                       // cao sàn
+const RX = MARGIN, RY = MARGIN;                    // góc trên trái khung phòng
+const IX = RX + ROOM.frame;                        // mép trong bên trái
+const WY = RY + ROOM.top;                          // đỉnh tường sau
+const FY = WY + ROOM.wallH;                        // đỉnh sàn
+const BY = FY + FH;                                // đỉnh xà dưới
+const RW = FW + ROOM.frame * 2;                    // rộng cả phòng
+const RH = ROOM.top + ROOM.wallH + FH + ROOM.frame;
+const W = RW + MARGIN * 2;
+const H = RH + MARGIN * 2 + 4;
+const DOOR_X = IX + ROOM.door.col * TILE;
+const DOOR_W = ROOM.door.width * TILE;
+
+// Danh sách đồ vật — bước sau sẽ thêm vào đây (giường, bàn, cây...)
+const entities = [];
+
+// =====================================================================
+//  VẼ
+// =====================================================================
+const cv = document.getElementById('room');
+cv.width = W; cv.height = H;
+const g = cv.getContext('2d');
+const r = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(x, y, w, h); };
+
+let theme = THEMES.warm;
+let night = false;
+
+// Xà gỗ nằm ngang: có vân, đường nối ván, viền sáng/tối
+function beamH(x, y, w, h) {
+  const t = theme;
+  r(x, y, w, h, t.wood);
+  r(x, y, w, 1, t.woodL);
+  r(x, y + h - 1, w, 1, t.woodD);
+  for (let i = 0, sx = x + 20; sx < x + w - 4; i++, sx += 22 + (i % 3) * 4) r(sx, y + 1, 1, h - 2, t.woodD);
+  for (let i = 0; i < w; i += 7) r(x + i + (i % 3), y + 2 + (i % (h - 3 || 1)), 2, 1, t.woodL);
+  r(x, y - 1, w, 1, t.woodK);
+  r(x, y + h, w, 1, t.woodK);
+}
+
+// Cột gỗ dựng đứng
+function beamV(x, y, w, h) {
+  const t = theme;
+  r(x, y, w, h, t.wood);
+  r(x, y, 1, h, t.woodL);
+  r(x + w - 1, y, 1, h, t.woodD);
+  for (let sy = y + 18; sy < y + h - 4; sy += 26) r(x + 1, sy, w - 2, 1, t.woodD);
+  for (let i = 0; i < h; i += 9) r(x + 2 + (i % (w - 3)), y + i, 1, 2, t.woodL);
+  r(x - 1, y, 1, h, t.woodK);
+  r(x + w, y, 1, h, t.woodK);
+}
+
+// Khối gỗ vuông ở góc, có đinh ở giữa
+function cornerBlock(cx, cy, s = 12) {
+  const t = theme;
+  const x = cx - s / 2, y = cy - s / 2;
+  r(x - 1, y - 1, s + 2, s + 2, t.woodK);
+  r(x, y, s, s, t.woodL);
+  r(x + 1, y + 1, s - 2, s - 2, t.wood);
+  r(x + 2, y + 2, s - 4, s - 4, t.woodL);
+  r(x + 3, y + 3, s - 6, s - 6, t.wood);
+  r(cx - 1, cy - 1, 2, 2, t.woodD);
+  r(x, y + s - 1, s, 1, t.woodD);
+}
+
+// Thanh chống chéo ở hai góc trên tường
+function brace(x, y, dir) {
+  const t = theme;
+  for (let i = 0; i < 12; i++) {
+    const px = dir > 0 ? x + i : x - i - 3;
+    r(px, y + i, 4, 1, t.wood);
+    r(px, y + i + 1, 4, 1, t.woodD);
+  }
+}
+
+function drawWall() {
+  const t = theme;
+  r(IX, WY, FW, ROOM.wallH, t.wall);
+  if (t.wallPattern === 'stripes') {
+    for (let x = IX + 3; x < IX + FW; x += 6) r(x, WY, 2, ROOM.wallH - 8, t.wallD);
+    for (let x = IX; x < IX + FW; x += 12) for (let y = WY + 3; y < WY + ROOM.wallH - 10; y += 5) r(x + 5, y, 1, 1, t.wallL);
+  } else {
+    for (let i = 0; i < 40; i++) r(IX + ((i * 37) % FW), WY + 3 + ((i * 13) % (ROOM.wallH - 12)), 1, 1, t.wallD);
+  }
+  // bóng dưới xà trên
+  r(IX, WY, FW, 2, t.wallD);
+  r(IX, WY + 2, FW, 1, t.wallD + '88');
+  // ốp chân tường
+  const wy = WY + ROOM.wallH - 9;
+  r(IX, wy, FW, 9, t.wallD);
+  r(IX, wy, FW, 1, t.wallL);
+  for (let x = IX + 8; x < IX + FW; x += 16) r(x, wy + 2, 1, 6, t.wall);
+  r(IX, WY + ROOM.wallH - 2, FW, 2, t.woodD);
+  // bóng ở hai cạnh tường
+  r(IX, WY, 2, ROOM.wallH, t.wallD);
+  r(IX + FW - 2, WY, 2, ROOM.wallH, t.wallD);
+  brace(IX, WY, 1);
+  brace(IX + FW, WY, -1);
+}
+
+function drawFloor() {
+  const t = theme;
+  if (t.floorPattern === 'planks') {
+    const pw = 8;
+    for (let i = 0; i * pw < FW; i++) {
+      const x = IX + i * pw;
+      r(x, FY, pw, FH, t.floor[i % 2]);
+      r(x, FY, 1, FH, t.floorSeam);
+      const off = (i * 29) % 44;
+      for (let y = FY + off; y < FY + FH; y += 44) {
+        r(x + 1, y, pw - 1, 1, t.floorSeam);
+        r(x + 1, y + 1, pw - 1, 1, t.floorL);
+      }
+      for (let k = 0; k < 4; k++) r(x + 3 + (k % 3), FY + ((i * 17 + k * 31) % FH), 1, 2, t.floorL);
+    }
+  } else if (t.floorPattern === 'tiles') {
+    for (let ty = 0; ty < ROOM.rows; ty++)
+      for (let tx = 0; tx < ROOM.cols; tx++) {
+        const x = IX + tx * TILE, y = FY + ty * TILE;
+        r(x, y, TILE, TILE, t.floor[(tx + ty) % 2]);
+        r(x, y, TILE, 1, t.floorL);
+        r(x, y, 1, TILE, t.floorL);
+        r(x, y + TILE - 1, TILE, 1, t.floorSeam);
+        r(x + TILE - 1, y, 1, TILE, t.floorSeam);
+      }
+  }
+  // bóng đổ từ tường sau và hai bên
+  r(IX, FY, FW, 3, '#00000040');
+  r(IX, FY + 3, FW, 2, '#00000022');
+  r(IX, FY, 3, FH, '#00000030');
+  r(IX + FW - 3, FY, 3, FH, '#00000030');
+}
+
+function drawFrame() {
+  const t = theme;
+  // cột hai bên
+  beamV(RX, RY, ROOM.frame, RH);
+  beamV(RX + RW - ROOM.frame, RY, ROOM.frame, RH);
+  // xà trên
+  beamH(RX, RY, RW, ROOM.top);
+  // xà dưới, chừa lỗ cửa
+  beamH(RX, BY, DOOR_X - RX, ROOM.frame);
+  beamH(DOOR_X + DOOR_W, BY, RX + RW - DOOR_X - DOOR_W, ROOM.frame);
+  // ngưỡng cửa
+  r(DOOR_X, BY, DOOR_W, ROOM.frame, t.floor[0]);
+  for (let x = DOOR_X; x < DOOR_X + DOOR_W; x += 8) r(x, BY, 1, ROOM.frame, t.floorSeam);
+  r(DOOR_X, BY + ROOM.frame - 1, DOOR_W, 1, t.woodD);
+  // trụ cửa
+  for (const x of [DOOR_X - 5, DOOR_X + DOOR_W - 1]) {
+    r(x - 1, BY - 3, 8, ROOM.frame + 9, t.woodK);
+    r(x, BY - 2, 6, ROOM.frame + 7, t.woodL);
+    r(x + 1, BY - 1, 4, ROOM.frame + 5, t.wood);
+    r(x + 2, BY + 2, 2, 2, t.woodD);
+  }
+  // thảm chùi chân ngoài cửa
+  const my = BY + ROOM.frame + 2;
+  r(DOOR_X + 3, my, DOOR_W - 6, 9, t.matD);
+  r(DOOR_X + 4, my + 1, DOOR_W - 8, 7, t.mat);
+  r(DOOR_X + 6, my + 3, DOOR_W - 12, 3, t.matD);
+  r(DOOR_X + 8, my + 4, DOOR_W - 16, 1, t.mat);
+  // 4 góc
+  cornerBlock(RX + ROOM.frame / 2, RY + ROOM.top / 2);
+  cornerBlock(RX + RW - ROOM.frame / 2, RY + ROOM.top / 2);
+  cornerBlock(RX + ROOM.frame / 2, BY + ROOM.frame / 2);
+  cornerBlock(RX + RW - ROOM.frame / 2, BY + ROOM.frame / 2);
+}
+
+function drawNight() {
+  if (!night) return;
+  // chỉ làm tối phần phòng (khung + thảm), không đụng nền ngoài
+  g.save();
+  g.beginPath();
+  g.rect(RX - 3, RY - 3, RW + 6, RH + 6);
+  g.rect(DOOR_X + 3, BY, DOOR_W - 6, ROOM.frame + 11);
+  g.rect(DOOR_X - 6, BY, DOOR_W + 12, ROOM.frame + 7); // trụ cửa
+  g.clip();
+  g.globalCompositeOperation = 'multiply';
+  r(0, 0, W, H, '#3c3f7a');
+  g.globalCompositeOperation = 'source-over';
+  // ánh sáng hắt vào từ cửa
+  const grd = g.createRadialGradient(DOOR_X + DOOR_W / 2, BY + 4, 2, DOOR_X + DOOR_W / 2, BY, 60);
+  grd.addColorStop(0, 'rgba(255,190,110,0.35)');
+  grd.addColorStop(1, 'rgba(255,190,110,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, W, H);
+  g.restore();
+}
+
+function draw() {
+  r(0, 0, W, H, theme.bg);
+  drawWall();
+  drawFloor();
+  // đồ vật sắp theo chiều sâu (y lớn hơn vẽ sau)
+  entities.sort((a, b) => a.y - b.y).forEach((e) => e.draw(g, r, theme));
+  drawFrame();
+  drawNight();
+  document.body.style.background = theme.bg;
+}
+
+// =====================================================================
+//  PHÓNG TO CHO VỪA MÀN HÌNH + LƯỚI Ô
+// =====================================================================
+const grid = document.getElementById('grid');
+const gg = grid.getContext('2d');
+let scale = 1;
+let showGrid = false;
+
+function fit() {
+  const st = document.getElementById('stage').getBoundingClientRect();
+  scale = Math.max(1, Math.floor(Math.min(st.width / W, st.height / H)));
+  cv.style.width = W * scale + 'px';
+  cv.style.height = H * scale + 'px';
+  grid.width = W * scale; grid.height = H * scale;
+  grid.style.width = W * scale + 'px'; grid.style.height = H * scale + 'px';
+  drawGrid();
+}
+
+function drawGrid() {
+  gg.clearRect(0, 0, grid.width, grid.height);
+  if (!showGrid) return;
+  gg.strokeStyle = 'rgba(255,255,255,0.35)';
+  gg.lineWidth = 1;
+  gg.beginPath();
+  for (let c = 0; c <= ROOM.cols; c++) {
+    const x = Math.round((IX + c * TILE) * scale) + 0.5;
+    gg.moveTo(x, FY * scale); gg.lineTo(x, (FY + FH) * scale);
+  }
+  for (let rr = 0; rr <= ROOM.rows; rr++) {
+    const y = Math.round((FY + rr * TILE) * scale) + 0.5;
+    gg.moveTo(IX * scale, y); gg.lineTo((IX + FW) * scale, y);
+  }
+  gg.stroke();
+  gg.fillStyle = 'rgba(255,255,255,0.55)';
+  gg.font = `${Math.max(9, scale * 3)}px monospace`;
+  for (let rr = 0; rr < ROOM.rows; rr++)
+    for (let c = 0; c < ROOM.cols; c++)
+      gg.fillText(`${c},${rr}`, (IX + c * TILE) * scale + 3, (FY + rr * TILE) * scale + scale * 4 + 2);
+  // vùng tường
+  gg.fillStyle = 'rgba(120,200,255,0.18)';
+  gg.fillRect(IX * scale, WY * scale, FW * scale, ROOM.wallH * scale);
+}
+
+// Toạ độ khi rê chuột
+const tip = document.getElementById('tip');
+function showTip(ev) {
+  const b = cv.getBoundingClientRect();
+  const px = (ev.clientX - b.left) / scale;
+  const py = (ev.clientY - b.top) / scale;
+  let text = '';
+  if (px >= IX && px < IX + FW && py >= FY && py < FY + FH)
+    text = `Sàn · ô (${Math.floor((px - IX) / TILE)}, ${Math.floor((py - FY) / TILE)})`;
+  else if (px >= IX && px < IX + FW && py >= WY && py < FY)
+    text = `Tường · cột ${Math.floor((px - IX) / TILE)}`;
+  else if (px >= DOOR_X && px < DOOR_X + DOOR_W && py >= BY && py < BY + 20) text = 'Cửa ra vào';
+  if (!text) { tip.style.display = 'none'; return; }
+  tip.textContent = text;
+  tip.style.display = 'block';
+  tip.style.left = ev.clientX + 14 + 'px';
+  tip.style.top = ev.clientY + 14 + 'px';
+}
+cv.addEventListener('pointermove', showTip);
+cv.addEventListener('pointerdown', showTip);
+cv.addEventListener('pointerleave', () => (tip.style.display = 'none'));
+
+// =====================================================================
+//  NÚT ĐIỀU KHIỂN
+// =====================================================================
+document.getElementById('theme').addEventListener('change', (e) => { theme = THEMES[e.target.value]; draw(); });
+document.getElementById('btn-grid').addEventListener('click', (e) => {
+  showGrid = !showGrid; e.target.classList.toggle('on', showGrid); drawGrid();
+});
+document.getElementById('btn-night').addEventListener('click', (e) => {
+  night = !night; e.target.classList.toggle('on', night); draw();
+});
+document.getElementById('btn-png').addEventListener('click', () => {
+  const out = document.createElement('canvas');
+  out.width = W * 4; out.height = H * 4;
+  const og = out.getContext('2d');
+  og.imageSmoothingEnabled = false;
+  og.drawImage(cv, 0, 0, out.width, out.height);
+  const a = document.createElement('a');
+  a.download = 'phong-trong.png';
+  a.href = out.toDataURL('image/png');
+  a.click();
+});
+window.addEventListener('resize', fit);
+
+draw();
+fit();
+</script>
+</body>
+</html>
