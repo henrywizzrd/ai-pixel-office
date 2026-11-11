@@ -452,22 +452,64 @@
     },
   });
 
+  // Màn hình kiểu PC cổ điển: viền dày màu kem, màn đen bóng có 2 vệt sáng dọc
+  function drawMonitor(it, iso, c, Z, u0 = 0, v0 = 0) {
+    const B = { top: P.white, mid: P.cream1, dark: P.pk2 };
+    // chân đế + cổ
+    it.box({ u0: u0 + 6, u1: u0 + 16, v0: v0, v1: v0 + 6, z0: Z, z1: Z + 1 }, M(B.top, B.mid, B.dark, null, true)); iso.commit(P.mag1);
+    it.box({ u0: u0 + 9, u1: u0 + 13, v0: v0 + 1, v1: v0 + 3, z0: Z + 1, z1: Z + 5 }, M(B.mid, B.mid, B.dark)); iso.commit(P.mag1);
+    // thân màn hình (dày 3)
+    const scr = SCREENS[c.s];
+    it.box({ u0, u1: u0 + 22, v0: v0, v1: v0 + 3, z0: Z + 4, z1: Z + 21 }, {
+      top: () => B.top,
+      side: (v, z, d, h, sh) => (sh ? B.dark : B.mid),
+      front: (u, z, w, h) => {
+        if (u < 2 || u >= w - 2 || z >= h - 2) return u === 0 || z === h - 1 ? B.top : B.mid;     // viền trên + 2 bên
+        if (z < 3) return z === 1 && u >= w / 2 - 1 && u <= w / 2 ? P.pk2 : B.mid;                 // viền dưới dày + logo
+        const su = u - 2, sz = z - 3, sw = w - 4, sh2 = h - 5;
+        if (c.s === 'glossy') {
+          if ((su === 1 || su === sw - 2) && sz > 1 && sz < sh2 - 2) return P.cream1;              // 2 vệt sáng dọc
+          if (sz === sh2 - 1 && su > 2 && su < 6) return P.plum3;
+          return P.ink;
+        }
+        if ((su === 0 || su === sw - 1) && sz > 1 && sz < sh2 - 2) return P.plum3;
+        return scr(su, sz, sw, sh2);
+      },
+      emissive: c.s !== 'glossy', emTop: false,
+    });
+    iso.commit(P.mag1);
+    if (c.s !== 'glossy') { const [gx, gy] = it.p(u0 + 11, v0 + 7, Z + 13); iso.glow(gx, gy, 15, '#8ff0ff', 0.35); }
+  }
+
   add({
     id: 'monitor', name: 'Màn hình', group: 'work', size: [3, 1], place: 'desk',
-    variants: [{ name: 'Code', s: 'code' }, { name: 'Thiết kế', s: 'design' }, { name: 'Biểu đồ', s: 'chart' }, { name: 'Tắt', s: 'off' }],
-    draw(it, iso, c, Z = 0) {
-      it.box({ u0: 5, u1: 13, v0: 0, v1: 4, z0: Z, z1: Z + 1 }, M(P.cream1, P.pk2, P.pk1)); iso.commit(P.mag1);
-      it.box({ u0: 7, u1: 11, v0: 1, v1: 3, z0: Z + 1, z1: Z + 6 }, M(P.cream1, P.pk2, P.pk1)); iso.commit(P.mag1);
-      const scr = SCREENS[c.s];
-      it.box({ u0: 0, u1: 18, v0: 0, v1: 2, z0: Z + 4, z1: Z + 19 }, {
-        top: () => P.white,
-        front: (u, z, w, h) => (u < 1 || u >= w - 1 || z < 1 || z >= h - 1 ? P.cream2 : scr(u - 1, z - 1, w - 2, h - 2)),
-        side: () => P.pk2,
-        emissive: c.s !== 'off', emTop: false,
-      });
-      iso.commit(P.mag1);
-      if (c.s !== 'off') { const [gx, gy] = it.p(9, 6, Z + 12); iso.glow(gx, gy, 14, '#8ff0ff', 0.35); }
-    },
+    variants: [{ name: 'Đen bóng', s: 'glossy' }, { name: 'Code', s: 'code' }, { name: 'Thiết kế', s: 'design' }, { name: 'Biểu đồ', s: 'chart' }],
+    draw(it, iso, c, Z = 0) { drawMonitor(it, iso, c, Z); },
+  });
+
+  // Thùng máy (case) đứng: mặt trước có khay ổ đĩa, đèn, khe đĩa mềm
+  function drawTower(it, iso, Z, u0 = 0, v0 = 0) {
+    it.box({ u0, u1: u0 + 10, v0, v1: v0 + 17, z0: Z, z1: Z + 22 }, {
+      top: (u, v, w, d) => (u >= w - 1 || v >= d - 1 ? P.white : P.cream2),
+      side: (v, z, d, h, sh) => (z === 3 || (v === 2 && z > 4 && z < h - 3) ? (sh ? P.pk1 : P.pk2) : sh ? P.pk2 : P.cream1),
+      front: (u, z, w, h) => {
+        if (u === 0 || u === w - 1 || z === h - 1) return P.white;
+        if ((z === h - 4 || z === h - 7) && u > 1 && u < w - 2) return P.ink;                          // 2 khay ổ đĩa
+        if (z === h - 5 && u > 1 && u < w - 2) return P.pk2;
+        if (z === h - 9 && (u === w - 3 || u === w - 5)) return u === w - 3 ? P.mint : P.cor4;          // đèn nguồn / ổ cứng
+        if (z === 6 && u > 1 && u < w - 2) return P.ink;                                                // khe đĩa mềm
+        if (z === 5 && u >= Math.floor(w / 2) - 1 && u <= Math.floor(w / 2)) return P.ink;
+        if (z < 3 && z > 0 && u % 2 === 1) return P.pk2;                                                // khe tản nhiệt
+        return P.cream1;
+      },
+    });
+    iso.commit(P.mag1);
+  }
+
+  add({
+    id: 'pc-tower', name: 'Thùng máy (case)', group: 'work', size: [2, 2], place: 'desk',
+    variants: [{ name: 'Kem cổ điển' }],
+    draw(it, iso, c, Z = 0) { drawTower(it, iso, Z); },
   });
 
   add({
@@ -492,55 +534,51 @@
     },
   });
 
+  function drawKeyboard(it, iso, c, Z, u0 = 0, v0 = 0) {
+    it.box({ u0, u1: u0 + 22, v0, v1: v0 + 6, z0: Z, z1: Z + 2 }, {
+      top: (u, v, w, d) => {
+        if (u === 0 || u === w - 1 || v === 0 || v === d - 1) return c.base;
+        if (v === d - 2 && u > 5 && u < w - 6) return c.key;           // phím cách dài
+        if (v < d - 2 && u % 2 === 1) return c.key;
+        return c.base;
+      },
+      front: () => c.side, side: () => c.side,
+    });
+    iso.commit(P.mag1);
+    // chuột
+    it.box({ u0: u0 + 25, u1: u0 + 29, v0: v0 + 1, v1: v0 + 7, z0: Z, z1: Z + 2 }, {
+      top: (u, v, w, d) => ((u === 0 || u === w - 1) && (v === 0 || v === d - 1) ? null : v === 2 ? c.side : u === 1 && v < 2 ? c.key : c.base),
+      front: () => c.side, side: () => c.side,
+    });
+    iso.commit(P.mag1);
+  }
+
   add({
-    id: 'keyboard', name: 'Bàn phím + chuột', group: 'work', size: [3, 1], place: 'desk',
+    id: 'keyboard', name: 'Bàn phím + chuột', group: 'work', size: [4, 1], place: 'desk',
     variants: [
-      { name: 'Trắng', base: P.white, key: P.pk2, side: P.pk1 },
-      { name: 'Mận', base: P.plum3, key: P.plum1, side: P.plum2 },
-      { name: 'Gaming', base: P.plum2, key: 'rgb', side: P.plum1 },
+      { name: 'Kem', base: P.white, key: P.pk2, side: P.cream1 },
+      { name: 'Hồng đào', base: P.cream1, key: P.pk1, side: P.pk2 },
+    ],
+    draw(it, iso, c, Z = 0) { drawKeyboard(it, iso, c, Z); },
+  });
+
+  // Góc làm việc ghép sẵn: bàn + case + màn hình + phím chuột
+  add({
+    id: 'workstation', name: 'Góc làm việc (bộ)', group: 'work', size: [5, 3], place: 'wall',
+    variants: [
+      { ...WOOD.plum, name: 'Bàn mận · màn đen', s: 'glossy' },
+      { ...WOOD.plum, name: 'Bàn mận · code', s: 'code' },
+      { ...WOOD.coral, name: 'Bàn san hô · thiết kế', s: 'design' },
+      { ...WOOD.white, name: 'Bàn kem · biểu đồ', s: 'chart' },
     ],
     draw(it, iso, c, Z = 0) {
-      const rgbKeys = [P.mint, P.mustard, P.cor4, P.mag4, P.lime];
-      it.box({ u0: 0, u1: 20, v0: 0, v1: 6, z0: Z, z1: Z + 2 }, {
-        top: (u, v, w, d) => {
-          if (u === 0 || v === 0 || u === w - 1 || v === d - 1) return c.base;
-          if (u % 2 === 1 && v % 2 === 1) return c.key === 'rgb' ? rgbKeys[Math.floor(u / 4) % 5] : c.key;
-          return c.base;
-        },
-        front: () => c.side, side: () => c.side,
-        emissive: c.key === 'rgb',
-      });
-      iso.commit(c.key === 'rgb' ? P.ink : P.mag1);
-      it.box({ u0: 23, u1: 27, v0: 1, v1: 6, z0: Z, z1: Z + 2 }, M(c.base, c.side, c.side, null, true));
-      iso.commit(c.key === 'rgb' ? P.ink : P.mag1);
+      ITEMS.find((i) => i.id === 'desk').draw(it, iso, c, Z);
+      drawTower(it, iso, Z + 24, 1, 3);
+      drawMonitor(it, iso, c, Z + 24, 14, 2);
+      drawKeyboard(it, iso, { base: P.white, key: P.pk2, side: P.cream1 }, Z + 24, 12, 15);
     },
   });
 
-  add({
-    id: 'desk-lamp', name: 'Đèn bàn', group: 'work', size: [1, 1], place: 'desk',
-    variants: [
-      { name: 'Vàng', c: P.mustard, d: P.mustD },
-      { name: 'Bạc hà', c: P.mint, d: P.mint2 },
-      { name: 'San hô', c: P.cor4, d: P.cor1 },
-    ],
-    draw(it, iso, c, Z = 0) {
-      // đế tròn
-      it.box({ u0: 0, u1: 7, v0: 0, v1: 7, z0: Z, z1: Z + 2 }, M(c.c, c.d, c.d, null, true)); iso.commit(P.mag1);
-      // cần đèn: thẳng lên rồi chéo ra trước
-      const pts = [];
-      for (let z = 2; z <= 14; z += 0.5) pts.push([3.5, 3.5, Z + z]);
-      for (let t = 0; t <= 1; t += 0.05) pts.push([3.5 + t * 6, 3.5 + t * 4, Z + 14 + t * 3]);
-      for (const [u, v, z] of pts) { const [px, py] = it.p(u, v, z); iso.put(px, py, P.plum2); }
-      const [jx, jy] = it.p(3.5, 3.5, Z + 14); iso.put(jx, jy, c.d);
-      iso.commit(null);
-      // chao đèn hình nón nghiêng xuống
-      const [hx, hy] = it.p(10, 8, Z + 16);
-      for (let y = 0; y < 5; y++) for (let x = -1 - y; x <= 1 + y; x++) iso.put(hx + x, hy + y, y === 0 ? c.d : x < 0 ? c.c : c.d);
-      for (let x = -4; x <= 4; x++) iso.put(hx + x, hy + 5, P.white, true);
-      iso.commit(P.mag1);
-      iso.glow(hx, hy + 9, 22, '#ffd27a', 0.55);
-    },
-  });
 
   add({
     id: 'filing-cabinet', name: 'Tủ hồ sơ', group: 'work', size: [2, 3], place: 'wall',
@@ -670,8 +708,6 @@
           if (c.kind === 'plaid') {
             if (iv % 14 < 2) return c.line;
             if (iu % 14 < 2) return c.b;
-            const cu = Math.abs(u - w / 2), cv = Math.abs(v - d / 2);
-            if (Math.abs(cu + cv - 14) < 1.5) return c.acc;
             return c.a;
           }
           if (c.kind === 'stripe') {
@@ -776,28 +812,21 @@
   });
 
   add({
-    id: 'string-lights', name: 'Đèn dây', group: 'decor', size: [8, 0], place: 'onwall', wallZ: 40,
-    variants: [{ name: 'Trắng ấm', cols: [P.white] }, { name: 'Nhiều màu', cols: [P.cor4, P.mustard, P.mint, P.mag4] }],
-    draw(it, iso, c, Z = 40, len = 64) {
-      // dây võng xuống giữa mỗi đoạn
-      const SEG = 10;
-      for (let u = 0; u <= len; u += 0.5) {
-        const t = (u % SEG) / SEG;
-        const sag = Math.sin(t * Math.PI) * 3;
-        const [wx, wy] = it.p(u, 1, Z - sag);
-        iso.put(wx, wy, P.plum1);
-      }
+    id: 'wall-light', name: 'Đèn tuýp ngang', group: 'decor', size: [6, 0], place: 'onwall', wallZ: 50,
+    variants: [{ name: 'Trắng ấm', glow: '#fff2c0', tube: P.white }, { name: 'Vàng', glow: '#ffd27a', tube: P.cream2 }],
+    draw(it, iso, c, Z = 50, len = 48) {
+      // giá đỡ + máng đèn + bóng tuýp phát sáng ở mép dưới
+      for (const u of [4, len - 6]) { it.box({ u0: u, u1: u + 2, v0: 0, v1: 3, z0: Z + 3, z1: Z + 5 }, M(P.plum3, P.plum2, P.plum1)); iso.commit(P.ink); }
+      it.box({ u0: 0, u1: len, v0: 2, v1: 6, z0: Z, z1: Z + 4 }, {
+        top: () => P.cream2,
+        front: (u, z) => (z === 0 ? c.tube : P.cream1),
+        side: () => P.pk2,
+        emissive: true, emTop: false,
+      });
+      iso.commit(P.mag1);
+      it.box({ u0: 1, u1: len - 1, v0: 3, v1: 5, z0: Z - 1, z1: Z }, { top: () => c.tube, front: () => c.tube, side: () => c.tube, emissive: true });
       iso.commit(null);
-      let k = 0;
-      for (let u = SEG / 2; u < len; u += SEG, k++) {
-        const [sx, sy] = it.p(u, 1, Z - 3);
-        const col = c.cols[k % c.cols.length];
-        iso.put(sx, sy + 1, P.plum2);
-        iso.blob(sx, sy + 3, 1, 2, col, true);
-        iso.put(sx, sy + 2, P.white, true);
-        iso.commit(null);
-        iso.glow(sx, sy + 3, 8, col === P.white ? '#fff2c0' : col, 0.6);
-      }
+      for (let u = 6; u < len; u += 12) { const [gx, gy] = it.p(u, 6, Z - 4); iso.glow(gx, gy, 16, c.glow, 0.5); }
     },
   });
 
