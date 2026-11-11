@@ -1101,26 +1101,6 @@
     },
   });
 
-  add({
-    id: 'coffee-table', name: 'Bàn trà', group: 'lounge', size: [5, 3], place: 'center',
-    variants: [WOOD.plum, WOOD.coral, WOOD.white],
-    draw(it, iso, c, Z = 0) {
-      const legM = M(c.leg, c.leg, c.leg === P.cream1 ? P.pk2 : P.plum1);
-      for (const [lu, lv] of [[1, 1], [33, 1], [1, 18], [33, 18]]) { it.box({ u0: lu, u1: lu + 2, v0: lv, v1: lv + 2, z0: Z, z1: Z + 13 }, legM); iso.commit(P.mag1); }
-      it.box({ u0: 2, u1: 34, v0: 2, v1: 19, z0: Z + 4, z1: Z + 6 }, M(c.mid, c.mid, c.dark)); iso.commit(c.ol);   // kệ dưới
-      it.box({ u0: 0, u1: 36, v0: 0, v1: 21, z0: Z + 13, z1: Z + 16 }, {
-        top: (u, v, w, d) => {
-          if (u >= w - 1 || v >= d - 1) return c.rim;
-          if ((u + v) % 13 === 0 && u > 3 && u < w - 6) return c.rim;     // vệt bóng mặt bàn
-          return c.top;
-        },
-        front: (u, z, w, h, sh) => (sh ? c.dark : c.mid), side: (v, z, d, h, sh) => (sh ? c.dark : c.mid),
-      });
-      iso.commit(c.ol);
-      // tạp chí trên kệ dưới
-      it.box({ u0: 6, u1: 16, v0: 5, v1: 13, z0: Z + 6, z1: Z + 7 }, M(P.mustard, P.mustD, P.mustD)); iso.commit(P.mag1);
-    },
-  });
 
   add({
     id: 'tv-stand', name: 'Kệ TV + TV', group: 'lounge', size: [7, 2], place: 'wall',
@@ -1345,17 +1325,6 @@
     },
   });
 
-  add({
-    id: 'conf-speaker', name: 'Loa hội nghị', group: 'meeting', size: [1, 1], place: 'desk',
-    variants: [{ name: 'Mận' }],
-    draw(it, iso, c, Z = 0) {
-      const [sx, sy] = it.p(5, 5, Z + 2);
-      iso.blob(sx, sy, 6, 3, P.plum2); iso.blob(sx, sy - 1, 5, 2, P.plum3);
-      for (let k = -3; k <= 3; k += 2) iso.put(sx + k, sy - 1, P.plum1);
-      iso.put(sx - 4, sy + 1, P.mint, true); iso.put(sx, sy + 2, P.mint, true); iso.put(sx + 4, sy + 1, P.mint, true);
-      iso.commit(P.ink);
-    },
-  });
 })(typeof window !== 'undefined' ? window : globalThis);
 
 </script>
