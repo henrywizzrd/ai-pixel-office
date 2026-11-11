@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Catalog đồ vật · Đợt 1</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #fad1a9; color: #4c2d54; font-family: ui-monospace, Consolas, monospace; transition: background .3s; }
+  body.night { background: #2a1c34; color: #f7dcd0; }
+  header { text-align: center; padding: 16px 10px 4px; }
+  h1 { margin: 0; font-size: 20px; letter-spacing: 2px; }
+  .sub { font-size: 12px; opacity: .75; margin-top: 4px; }
+  .bar { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; padding: 10px; position: sticky; top: 0; z-index: 2; background: inherit; }
+  button { font: inherit; font-size: 12px; padding: 5px 10px; border-radius: 4px; cursor: pointer; background: #fffbf5; color: #4c2d54; border: 2px solid #4c2d54; }
+  button.on { background: #4c2d54; color: #fffbf5; }
+  body.night button { background: #4c2d54; color: #f7dcd0; border-color: #8f5d82; }
+  body.night button.on { background: #f7dcd0; color: #2a1c34; }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; padding: 8px 16px 32px; max-width: 1400px; margin: 0 auto; }
+  .card { background: #fcf2e3; border: 2px solid #4c2d54; border-radius: 6px; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 6px; box-shadow: 4px 4px 0 #4c2d5433; }
+  body.night .card { background: #372240; border-color: #8f5d82; }
+  .card canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
+  .name { font-weight: bold; font-size: 14px; }
+  .meta { font-size: 11px; opacity: .75; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+  .row button { font-size: 11px; padding: 4px 8px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>CATALOG ĐỒ VẬT · ĐỢT 1</h1>
+    <div class="sub">Làm việc · Trang trí · Đồ nhỏ. Mỗi món có 2 hướng (dựa tường phải / tường trái) và nhiều màu.</div>
+  </header>
+  <div class="bar" id="tabs"></div>
+  <div id="grid"></div>
+
+<script src="../lib/iso-engine.js"></script>
+<script src="../lib/items.js"></script>
+<script>
+const { createIso, cornerRoom, mat, P } = Iso;
+const SCALE = 4;
+let night = false;
+let groupFilter = 'all';
+
+// Vẽ 1 món vào canvas của thẻ
+function renderItem(canvas, item, state) {
+  const iu = Math.max(8, item.size[0] * 8), iv = Math.max(8, item.size[1] * 8);
+  const S = Math.max(item.place === 'desk' ? 40 : 44, Math.max(iu, iv) + 18);
+  const WH = item.place === 'onwall' ? (item.wallZ || 30) + (item.id === 'window' ? 46 : item.id === 'string-lights' ? 8 : 32) : item.place === 'desk' ? 48 : 56;
+  const W = S * 2 + 12, H = S + WH + 20;
+  const iso = createIso(W, H, { ox: S + 6, oy: WH + 10 });
+  iso.S.night = night;
+  iso.clear();
+  cornerRoom(iso, S, S, WH);
+  const c = item.variants[state.v];
+  if (item.place === 'desk') {
+    const du = Math.max(28, iu + 10), dv = Math.max(18, iv + 8);
+    const d = iso.at(state.dir, (S - du) / 2, 4);
+    d.box({ u0: 0, u1: du, v0: 0, v1: dv, z0: 0, z1: 24 }, mat(P.plum3, P.plum2, P.plum1, P.plum4));
+    iso.commit(P.ink);
+    item.draw(iso.at(state.dir, (S - du) / 2 + (du - iu) / 2, 4 + (dv - iv) / 2), iso, c, 24);
+  } else if (item.place === 'onwall') {
+    item.draw(iso.at(state.dir, (S - iu) / 2, 0), iso, c, item.wallZ);
+  } else if (item.place === 'wall') {
+    item.draw(iso.at(state.dir, (S - iu) / 2, 3), iso, c, 0);
+  } else {
+    item.draw(iso.at(state.dir, (S - iu) / 2, (S - iv) / 2), iso, c, 0);
+  }
+  iso.finish(canvas);
+  canvas.style.width = W * SCALE + 'px';
+  canvas.style.height = H * SCALE + 'px';
+}
+
+const cards = [];
+function build() {
+  const tabs = document.getElementById('tabs');
+  const mk = (label, onclick, cls = '') => { const b = document.createElement('button'); b.textContent = label; b.className = cls; b.onclick = onclick; return b; };
+  const tabBtns = [];
+  const setTab = (g, btn) => { groupFilter = g; tabBtns.forEach((b) => b.classList.toggle('on', b === btn)); cards.forEach((c) => (c.el.style.display = g === 'all' || c.item.group === g ? '' : 'none')); };
+  const all = mk(`Tất cả (${ITEMS.length})`, () => setTab('all', all), 'on'); tabBtns.push(all); tabs.appendChild(all);
+  for (const [g, label] of Object.entries(ITEM_GROUPS)) {
+    const n = ITEMS.filter((i) => i.group === g).length;
+    const b = mk(`${label} (${n})`, () => setTab(g, b)); tabBtns.push(b); tabs.appendChild(b);
+  }
+  const nb = mk('Ban đêm', () => { night = !night; nb.classList.toggle('on', night); document.body.classList.toggle('night', night); cards.forEach(draw); });
+  tabs.appendChild(nb);
+
+  const grid = document.getElementById('grid');
+  for (const item of ITEMS) {
+    const el = document.createElement('div'); el.className = 'card';
+    const canvas = document.createElement('canvas');
+    const name = document.createElement('div'); name.className = 'name'; name.textContent = item.name;
+    const meta = document.createElement('div'); meta.className = 'meta';
+    const row = document.createElement('div'); row.className = 'row';
+    const card = { item, el, canvas, meta, state: { v: 0, dir: 'R' } };
+    const dirBtn = mk('⇄ Đổi hướng', () => { card.state.dir = card.state.dir === 'R' ? 'L' : 'R'; draw(card); });
+    const varBtn = mk('', () => { card.state.v = (card.state.v + 1) % item.variants.length; draw(card); });
+    card.varBtn = varBtn;
+    row.append(dirBtn); if (item.variants.length > 1) row.append(varBtn);
+    el.append(canvas, name, meta, row);
+    grid.appendChild(el);
+    cards.push(card);
+    draw(card);
+  }
+}
+
+function draw(card) {
+  const { item, state } = card;
+  renderItem(card.canvas, item, state);
+  const sz = item.place === 'onwall' ? `rộng ${item.size[0]} ô · treo tường` : `${item.size[0]}×${item.size[1]} ô`;
+  card.meta.textContent = `${sz} · ${item.variants[state.v].name} · ${state.dir === 'R' ? 'tường phải' : 'tường trái'}`;
+  card.varBtn.textContent = `🎨 Màu ${state.v + 1}/${item.variants.length}`;
+}
+
+build();
+</script>
+</body>
+</html>
