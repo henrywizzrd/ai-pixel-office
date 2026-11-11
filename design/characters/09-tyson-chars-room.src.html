@@ -62,15 +62,16 @@ function scene(iso) {
   // 5) Nhân vật Tyson vẽ (dev + office worker) — đặt theo ô sàn (x dọc tường phải, y dọc tường trái)
   const people = [['dev', 52, 64], ['worker', 92, 58]];
   people.sort((a, b) => a[1] + a[2] - (b[1] + b[2]));     // ai gần người xem hơn thì vẽ sau
-  for (const [name, x, y] of people) drawSprite(iso, TYSON_SPRITES[name], x, y);
+  for (const [name, x, y] of people) drawSprite(iso, TYSON_SPRITES[name].xuong, x, y);
 }
 
 // Vẽ sprite pixel (từ file .aseprite) với chân đặt tại ô sàn (x, y)
 function drawSprite(iso, S, x, y) {
   const [fx, fy] = iso.proj(x, y, 0);
   iso.blob(fx, fy, 8, 3, '#3a1c2c'); iso.commit(null, 0.25);       // bóng dưới chân
-  const ox = fx - Math.floor(S.w / 2), oy = fy - S.h + 1;
-  S.rows.forEach((row, j) => [...row].forEach((ch, i) => ch !== '.' && iso.put(ox + i, oy + j, S.pal[ch])));
+  const rows = S.frames[S.frames.length > 1 ? 1 : 0];
+  const ox = fx - Math.floor(S.w / 2), oy = fy - rows.length + 1;
+  rows.forEach((row, j) => [...row].forEach((ch, i) => ch !== '.' && iso.put(ox + i, oy + j, S.pal[ch])));
   iso.commit(null);
 }
 
