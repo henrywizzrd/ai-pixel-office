@@ -36,6 +36,7 @@
 
 <script src="../lib/iso-engine.js"></script>
 <script src="../lib/items.js"></script>
+<script>window.CATALOG_SHOW = ['work', 'decor', 'small'];</script>
 <script>
 const { createIso, cornerRoom, mat, P } = Iso;
 const SCALE = 4;
@@ -72,13 +73,15 @@ function renderItem(canvas, item, state) {
 }
 
 const cards = [];
+const LIST = window.CATALOG_SHOW ? ITEMS.filter((i) => CATALOG_SHOW.includes(i.group)) : ITEMS;
 function build() {
   const tabs = document.getElementById('tabs');
   const mk = (label, onclick, cls = '') => { const b = document.createElement('button'); b.textContent = label; b.className = cls; b.onclick = onclick; return b; };
   const tabBtns = [];
   const setTab = (g, btn) => { groupFilter = g; tabBtns.forEach((b) => b.classList.toggle('on', b === btn)); cards.forEach((c) => (c.el.style.display = g === 'all' || c.item.group === g ? '' : 'none')); };
-  const all = mk(`Tất cả (${ITEMS.length})`, () => setTab('all', all), 'on'); tabBtns.push(all); tabs.appendChild(all);
+  const all = mk(`Tất cả (${LIST.length})`, () => setTab('all', all), 'on'); tabBtns.push(all); tabs.appendChild(all);
   for (const [g, label] of Object.entries(ITEM_GROUPS)) {
+    if (window.CATALOG_SHOW && !CATALOG_SHOW.includes(g)) continue;
     const n = ITEMS.filter((i) => i.group === g).length;
     const b = mk(`${label} (${n})`, () => setTab(g, b)); tabBtns.push(b); tabs.appendChild(b);
   }
@@ -86,7 +89,7 @@ function build() {
   tabs.appendChild(nb);
 
   const grid = document.getElementById('grid');
-  for (const item of ITEMS) {
+  for (const item of LIST) {
     const el = document.createElement('div'); el.className = 'card';
     const canvas = document.createElement('canvas');
     const name = document.createElement('div'); name.className = 'name'; name.textContent = item.name;
