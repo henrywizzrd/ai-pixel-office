@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Nhân vật · Ông sếp: 3 phương án tỉ lệ</title>
+<style>
+  body { margin: 0; background: #fad1a9; color: #4c2d54; font-family: ui-monospace, Consolas, monospace; text-align: center; }
+  h1 { font-size: 18px; margin: 16px 0 4px; letter-spacing: 2px; }
+  .sub { font-size: 12px; opacity: .75; margin-bottom: 10px; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; margin: 0 auto; }
+  .labels { display: flex; justify-content: center; gap: 0; font-size: 12px; font-weight: bold; margin: 6px auto 20px; }
+  .labels div { text-align: center; }
+  h2 { font-size: 14px; margin: 18px 0 6px; }
+</style>
+</head>
+<body>
+  <h1>ÔNG SẾP · 3 PHƯƠNG ÁN TỈ LỆ</h1>
+  <div class="sub">Ông béo, đầu hói vài cọng tóc, vest mận mở cúc, cà vạt đỏ, ria mép. Mint = dev mặc hoodie để so dáng.</div>
+  <h2>Phóng to</h2>
+  <canvas id="lineup"></canvas>
+  <div class="labels" id="labels"></div>
+  <h2>Đặt trong phòng thử (so với bàn, sofa)</h2>
+  <canvas id="room"></canvas>
+
+<script src="../lib/iso-engine.js"></script>
+<script src="../lib/items.js"></script>
+<script src="../lib/items-2.js"></script>
+<script src="../lib/characters.js"></script>
+<script>
+const { person, sprite, BOSS, DEV_B, BOSS_SPRITE } = Characters;
+// B dùng sprite vẽ tay; A và C là phác thảo tỉ lệ
+const drawOpt = (iso, o, x, y, flip) => (o === BOSS.cozy ? sprite(iso, BOSS_SPRITE, x, y, { flip }) : person(iso, x, y, { ...o, flip }));
+const OPTS = [BOSS.chibi, BOSS.cozy, BOSS.tall];
+
+// ---------- Hàng phóng to ----------
+(function () {
+  const CW = 46, W = CW * 4, H = 66, K = 6;
+  const iso = Iso.createIso(W, H, { ox: 0, oy: 0, bg: '#fad1a9' });
+  iso.clear();
+  // vạch chiều cao tham chiếu: bàn làm việc cao 24px
+  for (let x = 0; x < W; x += 2) iso.put(x, H - 4 - 24, Iso.P.pk1);
+  iso.commit(null, 0.8);
+  [...OPTS, DEV_B].forEach((o, i) => drawOpt(iso, o, i * CW + CW / 2, H - 4, false));
+  const cv = document.getElementById('lineup');
+  iso.finish(cv);
+  cv.style.width = W * K + 'px'; cv.style.height = H * K + 'px';
+  const lab = document.getElementById('labels');
+  lab.style.width = W * K + 'px';
+  [...OPTS, DEV_B].forEach((o) => { const d = document.createElement('div'); d.style.width = CW * K + 'px'; d.textContent = o.label; lab.appendChild(d); });
+  const note = document.createElement('div'); note.style.cssText = 'position:relative;font-size:11px;font-weight:normal;opacity:.7;margin-top:4px';
+})();
+
+// ---------- Trong phòng ----------
+(function () {
+  const RX = 128, RY = 120, WH = 80, W = 320, H = 240, K = 3;
+  const item = (id) => ITEMS.find((i) => i.id === id);
+  const v = (id, name) => item(id).variants.find((x) => x.name === name) || item(id).variants[0];
+  const iso = Iso.createIso(W, H, { ox: RY + (W - RX - RY) / 2, oy: WH + 12 });
+  iso.clear();
+  Iso.cornerRoom(iso, RX, RY, WH);
+  item('big-plant').draw(iso.at('R', 2, 2), iso, v('big-plant', 'Cây bụi'));
+  item('sofa-2').draw(iso.at('R', 24, 1), iso, v('sofa-2', 'Nhung san hô'));
+  item('workstation').draw(iso.at('L', 26, 1), iso, v('workstation', 'Bàn mận · màn đen'));
+  const D2 = 72;
+  item('desk').draw(iso.at('L', D2, 1), iso, v('desk', 'Gỗ mận'));
+  item('monitor').draw(iso.at('L', D2 + 1, 2), iso, v('monitor', 'Code'), 24);
+  item('keyboard').draw(iso.at('L', D2 + 1, 15), iso, v('keyboard', 'Kem'), 24);
+  item('laptop').draw(iso.at('L', D2 + 24, 9), iso, v('laptop', 'Bạc'), 24);
+  // nhân vật đứng giữa phòng (vẽ từ xa đến gần)
+  // A, B, C đứng thành hàng ngang trước sofa; dev đứng cạnh bàn
+  const people = [[BOSS.chibi, 58, 92, false], [BOSS.cozy, 88, 70, false], [BOSS.tall, 116, 46, false], [DEV_B, 36, 82, true]];
+  people.sort((a, b) => a[1] + a[2] - (b[1] + b[2]))
+    .forEach(([o, x, y, flip]) => { const [sx, sy] = iso.proj(x, y, 0); drawOpt(iso, o, sx, sy, flip); });
+  const cv = document.getElementById('room');
+  iso.finish(cv);
+  cv.style.width = W * K + 'px'; cv.style.height = H * K + 'px';
+})();
+</script>
+</body>
+</html>
