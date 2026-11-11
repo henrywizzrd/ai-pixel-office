@@ -97,6 +97,7 @@ function devAt(t) {
   const total = legs.reduce((s, l) => s + l[2], 0);
   let u = t % total;
   for (const [a, b, d] of legs) { if (u <= d) { const k = u / d; return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, b[0] - a[0], b[1] - a[1]]; } u -= d; }
+  return [PATH[0][0], PATH[0][1], 1, 0];
 }
 const S = TYSON_SPRITES, t0 = performance.now();
 function tick(now) {

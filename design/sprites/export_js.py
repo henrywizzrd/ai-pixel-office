@@ -17,7 +17,8 @@ def pack(frames, pal):
 data = {}
 wr, wp, _ = load('office-worker')
 data['worker'] = {'xuong': pack([wr], wp)}
-data['boss'] = {'xuong': pack([boss_tyson.rows], boss_tyson.pal)}
+br, bp, _ = load('boss')                      # sếp do Tyson vẽ (thay bản boss_tyson.py)
+data['boss'] = {'xuong': pack([br], bp)}
 data['dev'] = {d: pack(dev_views.DIRS[d], dev_views.PAL) for d in dev_views.DIRS}
 (HERE.parent / 'lib' / 'tyson-sprites.js').write_text(
     '// Sinh tự động bởi design/sprites/export_js.py — không sửa tay\nwindow.TYSON_SPRITES = ' + json.dumps(data) + ';\n',

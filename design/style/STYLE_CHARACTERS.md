@@ -38,3 +38,27 @@ File gốc: `tyson-models/dev.aseprite`, `tyson-models/office-worker.aseprite` (
 ## Ghi chú theo nhân vật
 - **Dev**: tóc nâu xoăn bồng, kính gọng đen, hoodie xanh cổ vịt có dây rút trắng + túi bụng, quần kaki be, giày đen đế trắng, kẹp laptop xám bên phải.
 - **Office worker**: tóc nâu chải gọn, vest xanh navy 2 hàng nút, sơ mi trắng, cà vạt đỏ đô, quần âu cùng màu vest, giày da nâu đen.
+
+---
+
+## Bổ sung 11/2026 — bộ mẫu chuẩn của Tyson (dùng làm KHUÔN, không tự sáng tác lại)
+
+File: `tyson-models/employee-8-angles.aseprite` (8 góc + frame 2 cầm cặp), `employee-work-poses.aseprite` (8 tư thế làm việc), `boss.aseprite`.
+
+**Nguyên tắc làm việc:** nhân vật mới = lấy đúng khung từ bộ mẫu này rồi thay tóc / màu đồ / phụ kiện.
+Không tự vẽ lại dáng người, hướng nhìn hay tư thế từ đầu (bản tự dựng trước đây bị chê xấu).
+
+### 8 góc nhìn (sheet 256×256, mỗi ô ~85 px, nhân vật ~19–25 × 57–60 px)
+Thứ tự trong sheet: hàng 1 = trước · 3/4 trước-trái · ngang trái(mặt quay trái) ; hàng 2 = 3/4 sau-trái · (trống) · sau ; hàng 3 = 3/4 sau-phải · ngang phải · 3/4 trước-phải.
+- **Ngang:** thân gần rộng như mặt trước (~19 px, KHÔNG gầy đi nhiều), đầu xoay hẳn: 1 mắt ở mép mặt, mũi nhô 1 px, tai ở giữa đầu, khối tóc dồn ra sau gáy; tay gần che mép thân; 2 chân hơi so le.
+- **Sau:** tóc phủ kín đầu, gáy tối hơn, tai nhỏ lộ 2 bên; lưng vest trơn, chỉ vài nếp nhăn + đường cổ áo; tay buông 2 bên lộ bàn tay; 2 ống quần tách rõ.
+- **3/4 sau:** thấy 1 tai + mép má bên phía quay; vai xa hẹp lại.
+- **3/4 trước:** như model gốc, vai gần rộng hơn, cà vạt lệch về phía xa.
+- Màu dùng rất nhiều sắc trung gian (gần 100+ màu), chuyển tông mềm như khử răng cưa — giữ nguyên khi thay màu (đổi theo dải, không tô phẳng).
+
+### 8 tư thế làm việc (employee-work-poses)
+Ngồi ghế xoay cầm laptop (ngang) · ngồi bàn gõ laptop (3/4, có bàn xám) · đứng cầm laptop · ngồi ghế băng gỗ + bàn gỗ · ngồi ghế xoay (3/4) · ngồi ghế xanh nhìn trước · đứng sau bàn xám · đứng cầm laptop (trái).
+Kích thước ~30–57 × 53–57 px; ghế/bàn vẽ cùng nét (viền tối có màu, 3–4 tông).
+
+### Sếp (boss.aseprite, 64×64)
+Tóc + râu quai nón bạc xám dày, da hồng nhạt, vest nâu kẻ sọc dọc + khăn cài túi ngực trắng, sơ mi trắng, cầm máy tính bảng xám viền đen, giày nâu đậm. **Đây là sếp chính thức** (thay bản boss_tyson.py).
