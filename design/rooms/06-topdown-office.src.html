@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Văn phòng 2D top-down · khu làm việc</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body { background: #2c2c3c; font-family: ui-monospace, Consolas, monospace; color: #ebe4f2; display: flex; flex-direction: column; align-items: center; }
+  .bar { display: flex; gap: 6px; padding: 10px; }
+  button { font: inherit; font-size: 12px; padding: 5px 10px; border-radius: 4px; cursor: pointer; background: #ebe4f2; color: #3a3a50; border: 2px solid #3a3a50; }
+  button.on { background: #3a3a50; color: #ebe4f2; border-color: #ebe4f2; }
+  #stage { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; min-height: 0; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+</style>
+</head>
+<body>
+  <div class="bar"><button id="btn-night">Ban đêm</button><button id="btn-png">Tải PNG</button></div>
+  <div id="stage"><canvas id="cv"></canvas></div>
+<script src="../lib/iso-engine.js"></script>
+<script src="../lib/td.js"></script>
+<script src="../lib/td-people.js"></script>
+<script>
+const W = 308, H = 222, X0 = 10, Y0 = 10, RW = 288, RH = 202;
+let night = false;
+const DESK_X = [28, 78, 128, 178].map((x) => X0 + x);
+const ROW_A = Y0 + 58, ROW_B = Y0 + 120;
+
+// Ai đang ngồi ở bàn nào: [hàng, cột, nhân vật]
+const SEATED = [['A', 1, 'DEV'], ['B', 2, 'DEV']];
+
+function staticScene(iso) {
+  TD.room(iso, { x0: X0, y0: Y0, w: RW, h: RH, wallH: 32, doorsLeft: [[110, 142]] });
+  // trên tường
+  TD.airCon(iso, X0 + 8, Y0 + 4);
+  TD.whiteboard(iso, X0 + 56, Y0 + 4, 48, 26);
+  TD.frame(iso, X0 + 110, Y0 + 8, 18, 18, 'cork');
+  TD.whiteboard(iso, X0 + 196, Y0 + 4, 44, 26, 'chart');
+  TD.frame(iso, X0 + 244, Y0 + 8, 16, 14, 'color');
+  // đồ sát tường
+  TD.suitcase(iso, X0 + 10, Y0 + 30);
+  TD.shelf(iso, X0 + 138, Y0 + 12, 34, 40);
+  TD.plant(iso, X0 + 176, Y0 + 27);
+  TD.waterCooler(iso, X0 + 266, Y0 + 16);
+  // 2 dãy cubicle (vẽ từ trên xuống dưới)
+  const items = [['crt', 'phone', 'lamp'], ['dual', 'papers'], ['laptop', 'crt', 'mug'], ['crt', 'phone', 'photo']];
+  for (const [row, y] of [['A', ROW_A], ['B', ROW_B]]) {
+    DESK_X.forEach((x, i) => {
+      TD.cubicle(iso, x, y, { items: items[(i + (row === 'B' ? 2 : 0)) % 4] });
+      const seat = SEATED.find((s) => s[0] === row && s[1] === i);
+      TD.chair(iso, x + 15, y + 36, seat ? 'dark' : i % 3 === 2 ? 'brown' : 'dark');
+      // người ngồi: đầu + vai nhô lên trên lưng ghế
+      if (seat) TDPeople.draw(iso, TDPeople[seat[2]], 'up', 'idle', x + 24, y + 42, { seated: true });
+    });
+  }
+  TD.printerTable(iso, X0 + 238, Y0 + 70);
+  TD.plant(iso, X0 + 262, Y0 + 168);
+  TD.plant(iso, X0 + 6, Y0 + 172);
+  TD.plant(iso, X0 + 240, Y0 + 108, false);
+}
+
+const cv = document.getElementById('cv'); cv.width = W; cv.height = H;
+const ctx = cv.getContext('2d');
+const bg = document.createElement('canvas'), layer = document.createElement('canvas');
+function renderStatic() {
+  const iso = Iso.createIso(W, H, { ox: 0, oy: 0, bg: '#2c2c3c' });
+  iso.S.night = night; iso.clear(); staticScene(iso); iso.finish(bg);
+}
+// Sếp đi tuần dọc lối đi dưới cùng
+function bossAt(t) {
+  const a = X0 + 24, b = X0 + 228, y = Y0 + 190, sp = 22;
+  const len = b - a, leg = len / sp, cyc = 2 * leg + 2;
+  const u = t % cyc;
+  if (u < leg) return { x: a + sp * u, y, dir: 'right', moving: true };
+  if (u < leg + 1) return { x: b, y, dir: 'down', moving: false };
+  if (u < 2 * leg + 1) return { x: b - sp * (u - leg - 1), y, dir: 'left', moving: true };
+  return { x: a, y, dir: 'down', moving: false };
+}
+let t0 = performance.now();
+function tick(now) {
+  const t = (now - t0) / 1000;
+  const iso = Iso.createIso(W, H, { ox: 0, oy: 0, bg: 'transparent' });
+  iso.S.night = night; iso.clear();
+  const s = bossAt(t);
+  const step = s.moving ? ['a', 'idle', 'b', 'idle'][Math.floor(t * 8) % 4] : 'idle';
+  TDPeople.draw(iso, TDPeople.BOSS, s.dir, step, Math.round(s.x), s.y);
+  iso.finish(layer);
+  ctx.clearRect(0, 0, W, H); ctx.drawImage(bg, 0, 0); ctx.drawImage(layer, 0, 0);
+  requestAnimationFrame(tick);
+}
+function fit() { const st = document.getElementById('stage').getBoundingClientRect(); const k = Math.max(1, Math.floor(Math.min(st.width / W, st.height / H))); cv.style.width = W * k + 'px'; cv.style.height = H * k + 'px'; }
+document.getElementById('btn-night').onclick = (e) => { night = !night; e.target.classList.toggle('on', night); renderStatic(); };
+document.getElementById('btn-png').onclick = () => { const o = document.createElement('canvas'); o.width = W * 4; o.height = H * 4; const g = o.getContext('2d'); g.imageSmoothingEnabled = false; g.drawImage(cv, 0, 0, o.width, o.height); const a = document.createElement('a'); a.download = 'van-phong-2d.png'; a.href = o.toDataURL(); a.click(); };
+window.addEventListener('resize', fit); fit();
+renderStatic(); requestAnimationFrame(tick);
+</script>
+</body>
+</html>

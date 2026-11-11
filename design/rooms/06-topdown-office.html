@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Văn phòng 2D top-down · khu làm việc</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body { background: #2c2c3c; font-family: ui-monospace, Consolas, monospace; color: #ebe4f2; display: flex; flex-direction: column; align-items: center; }
+  .bar { display: flex; gap: 6px; padding: 10px; }
+  button { font: inherit; font-size: 12px; padding: 5px 10px; border-radius: 4px; cursor: pointer; background: #ebe4f2; color: #3a3a50; border: 2px solid #3a3a50; }
+  button.on { background: #3a3a50; color: #ebe4f2; border-color: #ebe4f2; }
+  #stage { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; min-height: 0; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+</style>
+</head>
+<body>
+  <div class="bar"><button id="btn-night">Ban đêm</button><button id="btn-png">Tải PNG</button></div>
+  <div id="stage"><canvas id="cv"></canvas></div>
+<script>
+// =====================================================================
+//  ISO PIXEL ENGINE — dùng chung cho catalog và các phòng
+//
+//  Toạ độ thế giới (x, y, z), đơn vị pixel. Chiếu isometric 2:1:
+//     sx = ox + x - y        sy = oy + (x + y) / 2 - z
+//  Mặt "left" (y = y1) có độ sáng trung bình, mặt "right" (x = x1) tối nhất,
+//  mặt trên sáng nhất. Ánh sáng chiếu từ trên, lệch trái.
+//
+//  Đồ vật được vẽ theo toạ độ cục bộ (u, v, z):
+//     u = dọc theo bức tường mà đồ vật dựa vào
+//     v = hướng ra xa tường (về phía người xem)
+//  Hướng 'R' = dựa tường phải (mặt phẳng y = 0), 'L' = dựa tường trái (x = 0).
+//  Hướng L chính là ảnh soi gương của hướng R.
+// =====================================================================
+(function (global) {
+  const P = {
+    ink: '#372240', plum1: '#4c2d54', plum2: '#513359', plum3: '#6b4870', plum4: '#8f5d82',
+    mag0: '#520440', mag1: '#75125e', mag2: '#943672', mag3: '#a13f7d', mag4: '#c24c7d',
+    cor1: '#c65b69', cor2: '#cb5f72', cor3: '#da6f75', cor4: '#eb8379',
+    pk1: '#ebaaa2', pk2: '#ebb9b2', peach: '#fcaf7e', peach2: '#fcaf92', sand: '#fad1a9',
+    cream1: '#f7dcd0', cream2: '#fcf2e3', white: '#fffbf5',
+    mustard: '#e4d176', mustD: '#b8a24a', mint: '#6fd6a5', mint2: '#3fae8a', mint3: '#2f7f6e', lime: '#d4eda9',
+    brown: '#7a3b2a', sky: '#bfe3f0',
+  };
+
+  const rgbCache = new Map();
+  function rgb(hex) {
+    if (!rgbCache.has(hex)) {
+      const n = parseInt(hex.slice(1, 7), 16);
+      rgbCache.set(hex, [(n >> 16) & 255, (n >> 8) & 255, n & 255]);
+    }
+    return rgbCache.get(hex);
+  }
+
+  // Khối vật liệu: màu mặt trên / mặt sáng vừa / mặt tối + viền sáng cạnh trước
+  // round = true: cắt 1px ở góc để khối trông bo tròn mềm
+  function mat(top, mid, dark, rim, round = false) {
+    return {
+      top: (u, v, w, d) => {
+        if (round && (u === 0 || u === w - 1) && (v === 0 || v === d - 1)) return null;
+        return rim && (u >= w - 1 || v >= d - 1) ? rim : top;
+      },
+      front: (u, z, w, h, sh) => (round && z === h - 1 && (u === 0 || u === w - 1) ? null : sh ? dark : mid),
+      side: (v, z, d, h, sh) => (round && z === h - 1 && (v === 0 || v === d - 1) ? null : sh ? dark : mid),
+    };
+  }
+
+  function createIso(W, H, { ox, oy, bg = P.sand } = {}) {
+    const main = new Uint8ClampedArray(W * H * 4);
+    const emissive = new Uint8Array(W * H);
+    const layer = new Int32Array(W * H).fill(-1);
+    const layerEm = new Uint8Array(W * H);
+    let touched = [];
+    const colors = [];
+    const colorIdx = new Map();
+    const glows = [];
+    const ci = (hex) => {
+      if (!colorIdx.has(hex)) { colorIdx.set(hex, colors.length); colors.push(rgb(hex)); }
+      return colorIdx.get(hex);
+    };
+    const S = { night: false, bg };
+
+    function clear() {
+      const clearA = S.bg === 'transparent' ? 0 : 255;
+      const c = clearA ? rgb(S.night ? '#2a1c34' : S.bg) : [0, 0, 0];
+      for (let i = 0; i < W * H; i++) {
+        main[i * 4] = c[0]; main[i * 4 + 1] = c[1]; main[i * 4 + 2] = c[2]; main[i * 4 + 3] = clearA;
+        emissive[i] = 1;
+      }
+      glows.length = 0;
+    }
+
+    function put(px, py, hex, em = false) {
+      px = Math.round(px); py = Math.round(py);
+      if (px < 0 || py < 0 || px >= W || py >= H || !hex) return;
+      const i = py * W + px;
+      if (layer[i] === -1) touched.push(i);
+      layer[i] = ci(hex);
+      layerEm[i] = em ? 1 : 0;
+    }
+
+    function box(b, st) {
+      const { x0, x1, y0, y1, z0, z1 } = b;
+      const em = !!st.emissive;
+      const sxMin = Math.floor(ox + x0 - y1) - 1, sxMax = Math.ceil(ox + x1 - y0) + 1;
+      const syMin = Math.floor(oy + (x0 + y0) / 2 - z1) - 1, syMax = Math.ceil(oy + (x1 + y1) / 2 - z0) + 1;
+      for (let py = Math.max(0, syMin); py <= Math.min(H - 1, syMax); py++)
+        for (let px = Math.max(0, sxMin); px <= Math.min(W - 1, sxMax); px++) {
+          const u = px + 0.5 - ox, vy = py + 0.5 - oy;
+          if (st.top) {
+            const v = 2 * (vy + z1);
+            const x = (u + v) / 2, y = (v - u) / 2;
+            if (x >= x0 && x < x1 && y >= y0 && y < y1) {
+              const c = st.top(Math.floor(x - x0), Math.floor(y - y0), x1 - x0, y1 - y0);
+              if (c) { put(px, py, c, em && st.emTop !== false); continue; }
+            }
+          }
+          if (st.left) {
+            const x = u + y1, z = (x + y1) / 2 - vy;
+            if (x >= x0 && x < x1 && z >= z0 && z < z1) {
+              const c = st.left(Math.floor(x - x0), Math.floor(z - z0), x1 - x0, z1 - z0);
+              if (c) { put(px, py, c, em); continue; }
+            }
+          }
+          if (st.right) {
+            const y = x1 - u, z = (x1 + y) / 2 - vy;
+            if (y >= y0 && y < y1 && z >= z0 && z < z1) {
+              const c = st.right(Math.floor(y - y0), Math.floor(z - z0), y1 - y0, z1 - z0);
+              if (c) put(px, py, c, em);
+            }
+          }
+        }
+    }
+
+    const proj = (x, y, z) => [Math.round(ox + x - y), Math.round(oy + (x + y) / 2 - z)];
+
+    function blob(cx, cy, rx, ry, hex, em = false) {
+      for (let y = -ry; y <= ry; y++)
+        for (let x = -rx; x <= rx; x++)
+          if ((x * x) / (rx * rx + 0.6) + (y * y) / (ry * ry + 0.6) <= 1) put(cx + x, cy + y, hex, em);
+    }
+
+    // Đẩy lớp tạm xuống ảnh chính, viền 1px phía trong bằng màu outline
+    function commit(outline = P.ink, alpha = 1) {
+      if (outline && S.olMap && S.olMap[outline]) outline = S.olMap[outline];
+      const oc = outline ? ci(outline) : -1;
+      for (const i of touched) {
+        let c = layer[i];
+        if (oc >= 0 && !layerEm[i]) {
+          const x = i % W;
+          if (x === 0 || x === W - 1 || layer[i - 1] === -1 || layer[i + 1] === -1 || layer[i - W] === -1 || layer[i + W] === -1) c = oc;
+        }
+        const [r, g, b] = colors[c];
+        const k = i * 4;
+        if (alpha >= 1) { main[k] = r; main[k + 1] = g; main[k + 2] = b; main[k + 3] = 255; emissive[i] = layerEm[i]; }
+        else if (main[k + 3] === 0) { main[k] = r; main[k + 1] = g; main[k + 2] = b; main[k + 3] = Math.round(alpha * 255); }
+        else { main[k] += (r - main[k]) * alpha; main[k + 1] += (g - main[k + 1]) * alpha; main[k + 2] += (b - main[k + 2]) * alpha; }
+      }
+      for (const i of touched) { layer[i] = -1; layerEm[i] = 0; }
+      touched = [];
+    }
+
+    const glow = (x, y, rad, hex, a = 0.5) => glows.push([x, y, rad, hex, a]);
+
+    // Đặt đồ vật: trả về bộ vẽ theo toạ độ cục bộ (u, v, z)
+    function at(dir, U, V) {
+      const R = dir !== 'L';
+      return {
+        dir: R ? 'R' : 'L',
+        box(lb, st) {
+          const { u0, u1, v0, v1, z0, z1 } = lb;
+          if (R)
+            box({ x0: U + u0, x1: U + u1, y0: V + v0, y1: V + v1, z0, z1 }, {
+              top: st.top, emissive: st.emissive, emTop: st.emTop,
+              left: st.front && ((x, z, w, h) => st.front(x, z, w, h, 0)),
+              right: st.side && ((y, z, d, h) => st.side(y, z, d, h, 1)),
+            });
+          else
+            box({ x0: V + v0, x1: V + v1, y0: U + u0, y1: U + u1, z0, z1 }, {
+              top: st.top && ((x, y, w, d) => st.top(y, x, d, w)), emissive: st.emissive, emTop: st.emTop,
+              right: st.front && ((y, z, d, h) => st.front(d - 1 - y, z, d, h, 1)),
+              left: st.side && ((x, z, w, h) => st.side(x, z, w, h, 0)),
+            });
+        },
+        p(u, v, z) { return R ? proj(U + u, V + v, z) : proj(V + v, U + u, z); },
+        // hướng ngang trên màn hình khi u tăng: +1 với R, -1 với L
+        get sgn() { return R ? 1 : -1; },
+      };
+    }
+
+    // Kết xuất ra canvas (ban đêm: tối dần trừ pixel phát sáng, cộng quầng sáng)
+    function finish(canvas) {
+      if (S.night) {
+        const tint = rgb('#5a4a8c');
+        for (let i = 0; i < W * H; i++) {
+          if (emissive[i]) continue;
+          const k = i * 4;
+          main[k] = (main[k] * tint[0]) / 255; main[k + 1] = (main[k + 1] * tint[1]) / 255; main[k + 2] = (main[k + 2] * tint[2]) / 255;
+        }
+        for (const [gx, gy, rad, hex, a] of glows) {
+          const [r, g, b] = rgb(hex);
+          for (let y = -rad; y <= rad; y++)
+            for (let x = -rad; x <= rad; x++) {
+              const d = Math.sqrt(x * x + y * y) / rad;
+              if (d > 1) continue;
+              const px = gx + x, py = gy + y;
+              if (px < 0 || py < 0 || px >= W || py >= H) continue;
+              const s = a * (d < 0.35 ? 0.6 : d < 0.7 ? 0.35 : 0.15);
+              const k = (py * W + px) * 4;
+              main[k] = Math.min(255, main[k] + r * s); main[k + 1] = Math.min(255, main[k + 1] + g * s); main[k + 2] = Math.min(255, main[k + 2] + b * s);
+            }
+        }
+      }
+      canvas.width = W; canvas.height = H;
+      canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(main), W, H), 0, 0);
+    }
+
+    return {
+      W, H, P, S, clear, put, box, blob, commit, proj, glow, at, finish,
+      get night() { return S.night; },
+    };
+  }
+
+  // Phòng nhỏ (góc 2 tường + sàn) để bày đồ vật trong catalog hoặc làm phòng thật
+  function cornerRoom(iso, RX, RY, WH, theme = {}) {
+    const { P } = iso;
+    const T = {
+      wallL: P.cream2, wallLlow: P.cream1, wallLline: P.pk1,
+      wallR: P.plum3, wallRlow: P.plum2, wallRline: P.plum1,
+      floorA: P.cor4, floorB: '#e57d77', seam: P.cor2, ...theme,
+    };
+    iso.box({ x0: -4, x1: 0, y0: -4, y1: RY, z0: -6, z1: WH }, {
+      top: () => P.white,
+      left: () => P.pk2,
+      right: (y, z) => (z < 2 ? P.pk1 : z < 16 ? (z === 15 ? P.white : y % 12 === 0 ? T.wallLline : T.wallLlow) : z < 18 ? P.pk2 : T.wallL),
+    });
+    iso.commit(P.mag1);
+    iso.box({ x0: 0, x1: RX, y0: -4, y1: 0, z0: -6, z1: WH }, {
+      top: () => P.white,
+      left: (x, z) => (z < 2 ? P.ink : z < 16 ? (z === 15 ? P.plum4 : x % 12 === 0 ? T.wallRline : T.wallRlow) : z < 18 ? P.plum4 : T.wallR),
+      right: () => P.plum4,
+    });
+    iso.commit(P.ink);
+    iso.box({ x0: 0, x1: RX, y0: 0, y1: RY, z0: -6, z1: 0 }, {
+      top: (x, y) => {
+        const row = Math.floor(y / 9);
+        if (y % 9 === 0) return T.seam;
+        if ((x + 56 - ((row * 37) % 56)) % 56 === 0) return T.seam;
+        if (x < 3 || y < 3) return P.cor3;
+        return row % 2 ? T.floorA : T.floorB;
+      },
+      left: (x, z) => (z === 5 ? P.cor2 : P.mag3),
+      right: (y, z) => (z === 5 ? P.mag3 : P.mag2),
+    });
+    iso.commit(P.mag0);
+  }
+
+  global.Iso = { createIso, mat, cornerRoom, P, rgb };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// =====================================================================
+//  VĂN PHÒNG 2D NHÌN TỪ TRÊN XUỐNG (3/4) — phong cách "Modern Office"
+//  Tông lạnh: tường trắng tím nhạt, sàn gạch xám 16px, viền xanh than.
+//  Vẽ thẳng trên màn hình (không chiếu iso). Dùng Iso.createIso làm "canvas pixel".
+// =====================================================================
+(function (global) {
+  const C = {
+    ol: '#3a3a50', ol2: '#46465e',
+    // tường
+    cap: '#f8f8f8', wall: '#ebe4f2', wallLine: '#e3dee6', wallShade: '#d8d0e0', base: '#c6bdd5', baseD: '#9da3b7',
+    brick: '#aea697', brickL: '#c0b6a6', brickD: '#9b8b7f', mortar: '#d0c8b8',
+    // sàn
+    tile: '#a8a8a8', tileL: '#b1b1b1', tileD: '#9e9e9f', tileS: '#969696',
+    plank: '#c0c0c1', plankL: '#cbcbcb', plankD: '#b1b1b1',
+    // gỗ bàn
+    wood: '#e0d0b0', woodL: '#ebdfc4', woodS: '#d4c09c', woodD: '#b89f7c', woodEdge: '#a8906c',
+    cork: '#d0be9c', corkD: '#bda766',
+    // vách ngăn / kim loại
+    part: '#d8d0e0', partL: '#ebe4f2', partD: '#acafbf', metal: '#9e9e9f', metalD: '#6d6b6b',
+    // ghế / đồ tối
+    dark: '#565972', darkL: '#6c6e85', darkD: '#46465e',
+    // màn hình
+    scr: '#1652b9', scrL: '#4995e3', bezel: '#46465e',
+    // màu nhấn
+    red: '#d93232', yellow: '#f8d239', green: '#64b63b', greenD: '#4e8a3a', greenL: '#9bc246', orange: '#ed931e', white: '#f8f8f8',
+    shadow: '#3a3a50',
+  };
+
+  function kit(iso) {
+    const R = (x, y, w, h, c) => { for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) iso.put(x + i, y + j, c); };
+    const P = (x, y, c) => iso.put(x, y, c);
+    const done = (ol = C.ol) => iso.commit(ol);
+    const shade = (x, y, w, h, a = 0.18) => { R(x, y, w, h, C.shadow); iso.commit(null, a); };   // bóng đổ mờ
+    return { R, P, done, shade };
+  }
+
+  // ---------------------------------------------------------------
+  //  KHUNG PHÒNG
+  // ---------------------------------------------------------------
+  // x0,y0 = góc trong trên-trái; w,h = kích thước trong; wallH = chiều cao tường sau
+  function room(iso, { x0, y0, w, h, wallH = 32, wallKind = 'plain', floorKind = 'tile', doorsLeft = [], doorsRight = [] }) {
+    const { R, P, done } = kit(iso);
+    // sàn
+    const fy = y0 + wallH;
+    for (let y = fy; y < y0 + h; y++)
+      for (let x = x0; x < x0 + w; x++) {
+        let c;
+        if (floorKind === 'tile') {
+          const tx = (x - x0) % 16, ty = (y - fy) % 16;
+          c = C.tile;
+          if (tx === 0 || ty === 0) c = C.tileL;
+          else if (tx === 15 || ty === 15) c = C.tileD;
+          else if (((x >> 4) * 7 + (y >> 4) * 3) % 5 === 0 && tx + ty < 8) c = C.tileL;   // vệt sáng nhẹ
+        } else {
+          const px = (x - x0) % 8, row = Math.floor((x - x0) / 8);
+          const joint = (y - fy + row * 13) % 40;
+          c = px === 0 ? C.plankD : joint === 0 ? C.plankD : px === 1 || joint === 1 ? C.plankL : C.plank;
+        }
+        P(x, y, c);
+      }
+    iso.commit(null);
+    // bóng tường đổ xuống sàn
+    R(x0, fy, w, 3, C.shadow); iso.commit(null, 0.16);
+    // tường sau
+    for (let y = y0; y < fy; y++)
+      for (let x = x0; x < x0 + w; x++) {
+        const ly = y - y0;
+        let c;
+        if (wallKind === 'brick') {
+          const row = Math.floor(ly / 5), bx = (x - x0 + (row % 2) * 6) % 12;
+          c = ly % 5 === 4 || bx === 11 ? C.mortar : (bx + row) % 5 === 0 ? C.brickL : (bx * 3 + row) % 7 === 0 ? C.brickD : C.brick;
+        } else c = ly % 4 === 3 ? C.wallLine : C.wall;
+        if (ly < 2) c = C.wallShade;
+        if (ly >= wallH - 4) c = ly === wallH - 1 ? C.ol2 : ly === wallH - 4 ? C.partL : C.base;
+        P(x, y, c);
+      }
+    iso.commit(null);
+    // mép tường nhìn từ trên: dải trắng giữa 2 đường viền đậm
+    const strip = (x, y, ww, hh) => { R(x, y, ww, hh, C.ol); R(x + 1, y + 1, Math.max(1, ww - 2), Math.max(1, hh - 2), C.cap); iso.commit(null); };
+    strip(x0 - 5, y0 - 5, w + 10, 6);                // trên
+    strip(x0 - 5, y0 + h - 1, w + 10, 6);            // dưới
+    const side = (x, gaps) => {
+      let y = y0 - 5;
+      const cuts = [...gaps].sort((a, b) => a[0] - b[0]);
+      for (const [g0, g1] of cuts) { strip(x, y, 6, y0 + g0 - y); y = y0 + g1; }
+      strip(x, y, 6, y0 + h + 5 - y);
+    };
+    side(x0 - 5, doorsLeft);
+    side(x0 + w - 1, doorsRight);
+  }
+
+  // ---------------------------------------------------------------
+  //  ĐỒ TREO TƯỜNG
+  // ---------------------------------------------------------------
+  function airCon(iso, x, y) {
+    const { R, done } = kit(iso);
+    R(x, y, 32, 11, C.white); R(x, y + 8, 32, 3, C.part); R(x + 2, y + 9, 28, 1, C.partD); R(x + 22, y + 3, 5, 2, C.ol2); R(x + 4, y + 3, 6, 1, C.partD);
+    done();
+  }
+  function whiteboard(iso, x, y, w = 48, h = 26, kind = 'blank') {
+    const { R, P, done } = kit(iso);
+    R(x, y, w, h, C.partD); R(x + 2, y + 2, w - 4, h - 6, C.white); R(x + 2, y + h - 4, w - 4, 4, C.part);
+    if (kind === 'chart') {
+      for (let i = 0; i < w - 12; i++) P(x + 6 + i, y + 6 + Math.round(Math.abs(Math.sin(i / 5)) * 6), C.red);
+      for (let i = 0; i < 4; i++) R(x + 8 + i * 6, y + h - 8 - (i + 1) * 2, 3, (i + 1) * 2, C.partD);
+      R(x + 6, y + 6, 8, 1, C.partD); R(x + 6, y + 9, 6, 1, C.partD);
+    }
+    R(x + w - 16, y + h - 3, 2, 1, C.red); R(x + w - 12, y + h - 3, 2, 1, C.scrL); R(x + w - 8, y + h - 3, 2, 1, C.green);
+    done();
+  }
+  function frame(iso, x, y, w = 18, h = 18, kind = 'cork') {
+    const { R, P, done } = kit(iso);
+    R(x, y, w, h, C.partD); R(x + 2, y + 2, w - 4, h - 4, kind === 'cork' ? C.cork : C.white);
+    if (kind === 'cork') { R(x + 4, y + 4, 4, 4, C.yellow); R(x + 9, y + 5, 4, 3, C.scrL); R(x + 5, y + 10, 5, 3, C.red); R(x + 11, y + 10, 3, 4, C.white); }
+    else { R(x + 4, y + 4, 4, 3, C.red); R(x + 8, y + 4, 4, 3, C.yellow); R(x + 4, y + 7, 4, 3, C.scrL); R(x + 8, y + 7, 4, 3, C.green); R(x + 12, y + 5, 2, 5, C.orange); }
+    done();
+  }
+
+  // ---------------------------------------------------------------
+  //  ĐỒ ĐẶT SÀN (toạ độ = góc trên trái của hình)
+  // ---------------------------------------------------------------
+  function shelf(iso, x, y, w = 34, h = 40) {
+    const { R, P, done, shade } = kit(iso);
+    shade(x + 2, y + h - 2, w, 3);
+    R(x, y, w, h, C.white);
+    for (const px of [0, w / 2 - 1, w - 3]) R(x + px, y, 3, h, C.part);
+    const shelves = [2, 14, 26];
+    const items = [[[3, 8, C.scr], [10, 6, C.ol2], [20, 7, C.orange]], [[3, 9, C.orange], [12, 4, C.green], [20, 4, C.yellow], [25, 4, C.scrL]], [[4, 10, C.part], [18, 8, C.metal]]];
+    shelves.forEach((sy, k) => {
+      R(x + 3, y + sy + 9, w - 6, 2, C.partD);
+      for (const [ix, iw, col] of items[k]) R(x + ix, y + sy + 3, iw, 6, col);
+    });
+    done();
+  }
+  function plant(iso, x, y, big = true) {
+    const { R, P, done, shade } = kit(iso);
+    const pw = big ? 12 : 8;
+    shade(x + 1, y + (big ? 22 : 14), pw + 2, 2);
+    R(x, y + (big ? 14 : 8), pw, big ? 9 : 7, C.metal); R(x, y + (big ? 14 : 8), pw, 2, C.part); R(x + 1, y + (big ? 21 : 13), pw - 2, 1, C.metalD);
+    done();
+    const cx = x + pw / 2, cy = y + (big ? 12 : 7);
+    const leaves = big ? [[0, -9, 3, 5], [-5, -6, 3, 3], [5, -6, 3, 3], [-7, -1, 3, 2], [7, -1, 3, 2], [-3, 0, 3, 2], [3, 0, 3, 2], [0, -3, 2, 3]] : [[0, -4, 2, 3], [-3, -1, 2, 2], [3, -1, 2, 2]];
+    for (const [dx, dy, rx, ry] of leaves) iso.blob(Math.round(cx + dx), cy + dy, rx, ry, C.greenD);
+    for (const [dx, dy, rx, ry] of leaves) iso.blob(Math.round(cx + dx), cy + dy - 1, Math.max(1, rx - 1), Math.max(1, ry - 1), C.green);
+    for (const [dx, dy] of leaves) P(Math.round(cx + dx) - 1, cy + dy - 2, C.greenL);
+    done(C.ol);
+  }
+  function waterCooler(iso, x, y) {
+    const { R, P, done, shade } = kit(iso);
+    shade(x + 2, y + 34, 14, 3);
+    R(x, y + 12, 14, 24, C.darkD); R(x + 1, y + 13, 12, 1, C.darkL); R(x + 3, y + 18, 8, 5, C.dark); R(x + 4, y + 26, 6, 1, C.metal); R(x + 4, y + 30, 6, 1, C.metal);
+    P(x + 4, y + 20, C.scrL); P(x + 9, y + 20, C.red);
+    done();
+    iso.blob(x + 7, y + 7, 6, 6, '#b9c3d5'); iso.blob(x + 6, y + 6, 4, 4, '#d4dee6'); R(x + 3, y + 3, 2, 3, C.white); R(x + 5, y + 12, 4, 1, '#91a5cf');
+    done();
+  }
+  function printerTable(iso, x, y) {
+    const { R, P, done, shade } = kit(iso);
+    shade(x + 2, y + 26, 34, 3);
+    R(x, y + 14, 34, 10, C.wood); R(x, y + 14, 34, 2, C.woodL); R(x, y + 22, 34, 3, C.woodD); R(x + 2, y + 25, 2, 3, C.metalD); R(x + 30, y + 25, 2, 3, C.metalD);
+    R(x + 4, y + 18, 26, 3, C.woodS);
+    done();
+    R(x + 14, y + 2, 18, 16, C.darkL); R(x + 14, y + 2, 18, 3, C.part); R(x + 17, y, 12, 4, C.white); R(x + 16, y + 10, 14, 4, C.dark); R(x + 18, y + 11, 3, 2, C.scrL);
+    P(x + 27, y + 8, C.green); P(x + 25, y + 8, C.red);
+    done();
+    R(x + 2, y + 6, 10, 10, C.wallShade); R(x + 2, y + 6, 10, 2, C.white); done();
+  }
+  function suitcase(iso, x, y) {
+    const { R, done, shade } = kit(iso);
+    shade(x + 1, y + 20, 14, 2);
+    R(x + 4, y, 6, 4, C.metal); R(x + 5, y + 1, 4, 3, C.wall);
+    R(x, y + 4, 14, 17, C.darkD); R(x + 1, y + 5, 12, 2, C.dark); R(x + 4, y + 11, 6, 3, C.part);
+    done();
+  }
+
+  // Ghế xoay nhìn từ phía sau (người ngồi quay mặt vào bàn phía trên)
+  function chair(iso, x, y, col = 'dark') {
+    const { R, P, done, shade } = kit(iso);
+    const m = col === 'brown' ? { a: '#c7754b', b: '#b35e3f', c: '#ab4a36' } : { a: C.darkL, b: C.dark, c: C.darkD };
+    shade(x + 1, y + 16, 16, 3);
+    R(x + 2, y + 14, 14, 2, C.darkD); R(x + 7, y + 12, 4, 4, C.darkD);
+    R(x + 1, y, 16, 13, m.c); R(x + 2, y + 1, 14, 11, m.b); R(x + 3, y + 1, 12, 2, m.a);
+    for (let k = 0; k < 4; k++) R(x + 4 + k * 3, y + 5, 1, 5, m.c);
+    done();
+  }
+
+  // Cụm bàn cubicle: vách sau (bảng ghim), 2 cột vách bên, mặt bàn gỗ
+  function cubicle(iso, x, y, opts = {}) {
+    const { R, P, done, shade } = kit(iso);
+    const w = 48;
+    shade(x + 2, y + 34, w, 3);
+    // chân bàn
+    R(x + 4, y + 31, 3, 5, C.metalD); R(x + w - 7, y + 31, 3, 5, C.metalD);
+    // mặt bàn
+    R(x + 2, y + 12, w - 4, 20, C.wood);
+    for (let i = 0; i < 18; i++) P(x + 4 + ((i * 17) % (w - 8)), y + 14 + ((i * 7) % 16), C.woodS);
+    R(x + 2, y + 12, w - 4, 1, C.woodL); R(x + 2, y + 29, w - 4, 3, C.woodD); R(x + 2, y + 29, w - 4, 1, C.woodEdge);
+    done();
+    // vách sau: khung xám + tấm ghim
+    R(x, y, w, 12, C.part); R(x, y, w, 2, C.partL); R(x + 3, y + 3, w - 6, 7, C.cork);
+    for (let i = 0; i < w - 6; i += 2) P(x + 3 + i, y + 4 + (i % 4 === 0 ? 2 : 4), C.corkD);
+    R(x, y + 10, w, 2, C.partD);
+    done();
+    // 2 cột vách bên
+    for (const px of [x - 2, x + w - 2]) { R(px, y - 3, 4, 38, C.part); R(px, y - 3, 1, 38, C.partL); R(px + 3, y - 3, 1, 38, C.partD); }
+    done();
+    // đồ trên bàn
+    const it = opts.items || ['crt', 'phone', 'lamp'];
+    const by = y + 14;
+    if (it.includes('crt')) crt(iso, x + 17, by - 4, opts.screen);
+    if (it.includes('dual')) { crt(iso, x + 6, by - 4, 'code'); crt(iso, x + 24, by - 4, opts.screen); }
+    if (it.includes('laptop')) laptop(iso, x + 6, by + 3);
+    if (it.includes('phone')) phone(iso, x + 5, by + 2);
+    if (it.includes('lamp')) lamp(iso, x + 36, by - 6);
+    if (it.includes('papers')) papers(iso, x + 34, by + 7);
+    if (it.includes('mug')) mug(iso, x + 38, by + 2);
+    if (it.includes('photo')) photo(iso, x + 36, by - 2);
+    keyboard(iso, x + 14, by + 10);
+  }
+  function crt(iso, x, y, kind = 'blue') {
+    const { R, P, done } = kit(iso);
+    R(x + 4, y + 15, 8, 3, C.bezel); R(x + 2, y + 17, 12, 2, C.metal);
+    R(x, y, 16, 15, C.bezel); R(x + 1, y + 1, 14, 1, C.darkL);
+    R(x + 2, y + 2, 12, 10, C.scr); R(x + 2, y + 2, 12, 1, C.scrL);
+    if (kind === 'code') for (let r = 0; r < 4; r++) R(x + 3 + (r % 2), y + 4 + r * 2, 6 + ((r * 3) % 5), 1, [C.green, C.yellow, C.white, C.scrL][r]);
+    else { P(x + 4, y + 5, C.red); P(x + 6, y + 5, C.yellow); P(x + 9, y + 5, C.white); P(x + 11, y + 5, C.white); P(x + 9, y + 8, C.white); P(x + 11, y + 8, C.white); R(x + 4, y + 8, 3, 2, C.scrL); }
+    done();
+    iso.glow(x + 8, y + 7, 12, '#4995e3', 0.35);
+  }
+  function laptop(iso, x, y) {
+    const { R, done } = kit(iso);
+    R(x, y, 14, 10, C.metal); R(x + 1, y + 1, 12, 7, C.metalD); R(x + 2, y + 2, 10, 5, C.scr); R(x + 2, y + 2, 10, 1, C.scrL);
+    R(x, y + 10, 14, 4, C.part); R(x + 1, y + 11, 12, 2, C.partD);
+    done();
+  }
+  function keyboard(iso, x, y) {
+    const { R, P, done } = kit(iso);
+    R(x, y, 18, 5, C.metal); for (let i = 0; i < 8; i++) { P(x + 1 + i * 2, y + 1, C.partD); P(x + 2 + i * 2, y + 3, C.partD); }
+    done();
+    R(x + 21, y + 1, 4, 5, C.metalD); done();   // chuột
+  }
+  function phone(iso, x, y) {
+    const { R, P, done } = kit(iso);
+    R(x, y, 10, 10, C.metal); R(x + 1, y + 1, 3, 8, C.metalD); R(x + 5, y + 2, 4, 2, C.part); P(x + 6, y + 6, C.red); P(x + 8, y + 6, C.green);
+    done();
+  }
+  function lamp(iso, x, y) {
+    const { R, P, done } = kit(iso);
+    R(x + 2, y + 14, 7, 3, C.metalD);
+    for (let k = 0; k < 9; k++) P(x + 5 - (k > 5 ? k - 5 : 0), y + 13 - k, C.metal);
+    R(x - 4, y + 2, 8, 4, C.part); R(x - 4, y + 2, 8, 1, C.white);
+    done();
+  }
+  function papers(iso, x, y) {
+    const { R, P, done } = kit(iso);
+    R(x, y, 10, 8, C.white); for (let k = 0; k < 3; k++) R(x + 2, y + 2 + k * 2, 6, 1, C.part);
+    done();
+  }
+  function mug(iso, x, y) { const { R, P, done } = kit(iso); R(x, y, 5, 5, C.red); R(x, y, 5, 1, '#fc5c46'); P(x + 5, y + 2, C.red); done(); }
+  function photo(iso, x, y) { const { R, P, done } = kit(iso); R(x, y, 9, 11, C.part); R(x + 1, y + 1, 7, 8, '#ffb893'); R(x + 2, y + 1, 5, 3, C.orange); done(); }
+
+  global.TD = { C, kit, room, airCon, whiteboard, frame, shelf, plant, waterCooler, printerTable, suitcase, chair, cubicle, crt, laptop, keyboard, phone, lamp, papers, mug };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// =====================================================================
+//  NHÂN VẬT 2D TOP-DOWN (cỡ RPG Maker, 16×23) — vẽ tay từng pixel
+//  Hướng: down (nhìn xuống), up (quay lưng), right (nhìn phải; left = lật gương)
+//  Chân dùng chung: idle / bước A / bước B, ghép với phần thân trên của từng hướng.
+// =====================================================================
+(function (global) {
+  const PAL = {
+    o: '#3a3a50', S: '#ffd6b0', s: '#eba882', e: '#3a3a50', g: '#ffffff', c: '#f69784',
+    // sếp
+    h: '#cbcbcb', H: '#a8a8a8', m: '#9e9e9f', W: '#f8f8f8', w: '#d4dee6', T: '#d93232', V: '#4a5a8a', v: '#3a4670',
+    P: '#46465e', p: '#3a3a50', K: '#6b4c2c', Y: '#f8d239',
+    // dev
+    r: '#805449', R: '#5c4a44', A: '#f2b22b', a: '#daa463', J: '#6c95b7', j: '#4d6e9a', N: '#f8f8f8', n: '#cbcbcb', X: '#46465e', x: '#d93232',
+  };
+
+  // ----- chân dùng chung (6 hàng cuối), ký tự L/l = quần, F = giày -----
+  const LEGS = {
+    down: {
+      idle: ['..oLLLLLLLLLLo..', '..oLLLLooLLLLo..', '..oLLLo..oLLLo..', '..oLLLo..oLLLo..', '..oFFFo..oFFFo..', '..ooooo..ooooo..'],
+      a:    ['..oLLLLLLLLLLo..', '..oLLLLooLLLLo..', '..oLLLo..oLLLo..', '..oFFFo..oLLLo..', '..ooooo..oFFFo..', '.........ooooo..'],
+      b:    ['..oLLLLLLLLLLo..', '..oLLLLooLLLLo..', '..oLLLo..oLLLo..', '..oLLLo..oFFFo..', '..oFFFo..ooooo..', '..ooooo.........'],
+    },
+    right: {
+      idle: ['...oLLLLLLLo....', '....oLLLLLo.....', '....oLLLLLo.....', '....oLLLLLo.....', '....oFFFFFFo....', '....oooooooo....'],
+      a:    ['...oLLLoLLLo....', '..oLLLo.oLLLo...', '..oLLo...oLLo...', '.oLLo....oLLLo..', '.oFFFo...oFFFFo.', '.ooooo...oooooo.'],
+      b:    ['...oLLLLLLLo....', '...oLLLoLLo.....', '..oLLLo.oLLo....', '..oLLo..oLLo....', '.oFFFo..oFFFo...', '.ooooo..ooooo...'],
+    },
+  };
+  LEGS.up = LEGS.down;
+
+  // ----- thân trên từng nhân vật (17 hàng) -----
+  const BOSS = {
+    legs: { L: 'P', F: 'K' },
+    down: [
+      '.....oooooo.....',
+      '...ooSSgSSSoo...',
+      '..oSSggSSSSSSo..',
+      '.ohSSSSSSSSSSho.',
+      '.ohSSeSSSSeSSho.',
+      '.ohSSeSSSSeSSho.',
+      '.ohcSSSssSSScho.',
+      '..oSSmmmmmmSSo..',
+      '..oSSSmSSmSSSo..',
+      '...ooSSSSSSoo...',
+      '..ooVVWTTWVVoo..',
+      '.oVVVVWTTWVVVVo.',
+      'oVVVVWWTTWWVVVvo',
+      'oSoVVWWWWWWVVoSo',
+      'oSoVVWWWWWWVVoso',
+      '.ooVVWWWWWWVVoo.',
+      '..oPPPPYYPPPPo..',
+    ],
+    up: [
+      '.....oooooo.....',
+      '...ooSSSSgSoo...',
+      '..oSSSSSSggSSo..',
+      '.ohSSSSSSSSSSho.',
+      '.ohhSSSSSSSShho.',
+      '.ohhhhhhhhhhhho.',
+      '.ohhhhhhhhhhhho.',
+      '..ohhhhhhhhhho..',
+      '..oSSSSSSSSSSo..',
+      '...ooSSSSSSoo...',
+      '..ooVVVVVVVVoo..',
+      '.oVVVVVVVVVVVVo.',
+      'oVVVVVVvVVVVVVvo',
+      'oSoVVVVvVVVVVoSo',
+      'oSoVVVVvVVVVVoso',
+      '.ooVVVVVVVVVVoo.',
+      '..oPPPPPPPPPPo..',
+    ],
+    right: [
+      '....oooooo......',
+      '..ooSSgSSSoo....',
+      '.oSSggSSSSSSo...',
+      '.ohhSSSSSSSSSo..',
+      '.ohhSSSSSSeSSo..',
+      '.ohhhSSSSSeSSSo.',
+      '.ohhSSSSSSSSSso.',
+      '..ohSSSSSSmmmo..',
+      '..oSSSSSSSSmo...',
+      '...ooSSSSSoo....',
+      '...ooVVVVWWo....',
+      '..oVVVVVVWWWo...',
+      '..oVVSSVVWWWWo..',
+      '..oVVSSVVWWWWo..',
+      '..oVVVVVVWWWWo..',
+      '...oVVVVVWWWo...',
+      '...oPPPPPPYPo...',
+    ],
+  };
+
+  const DEV = {
+    legs: { L: 'J', F: 'N' },
+    down: [
+      '....oooooooo....',
+      '...orrRrrRrro...',
+      '..orrrrrrrrrro..',
+      '.oXrrRrrrrRrrXo.',
+      '.oxrSSrSSSrSSxo.',
+      '.oxSSeSSSSeSSxo.',
+      '.oXSSeSSSSeSSXo.',
+      '..oSSSSssSSSSo..',
+      '..oSSSSSSSSSSo..',
+      '...ooSScSSSoo...',
+      '..ooAAAAAAAAoo..',
+      '.oAAAAWAAWAAAAo.',
+      '.oAAAAWAAWAAAAo.',
+      '.oSoAAAAAAAAoSo.',
+      '.oSoaaaaaaaaoso.',
+      '..ooAAAAAAAAoo..',
+      '..oJJJJJJJJJJo..',
+    ],
+    up: [
+      '....oooooooo....',
+      '...orrRrrRrro...',
+      '..orrrrrrrrrro..',
+      '.oXrrrrrrrrrrXo.',
+      '.oxrrrRrrrRrrxo.',
+      '.oxrrrrrrrrrrxo.',
+      '.oXrrrrrrrrrrXo.',
+      '..orrrrRrrrrro..',
+      '..oSrrrrrrrrSo..',
+      '...ooSSSSSSoo...',
+      '..ooaAAAAAAaoo..',
+      '.oAAAAAAAAAAAAo.',
+      '.oAAAAAAAAAAAAo.',
+      '.oSoAAAAAAAAoSo.',
+      '.oSoaaaaaaaaoso.',
+      '..ooAAAAAAAAoo..',
+      '..oJJJJJJJJJJo..',
+    ],
+    right: [
+      '....ooooooo.....',
+      '...orrrRrrro....',
+      '..orrrrrrrrrro..',
+      '..orrrrrrrRrro..',
+      '.oXXrrrSSrSSSo..',
+      '.oxxXrSSSSeSSo..',
+      '.oxxXSSSSSeSSSo.',
+      '.oXXSSSSSSSSSo..',
+      '..orSSSSSSScSo..',
+      '...ooSSSSSSoo...',
+      '...ooAAAAAAo....',
+      '..oAAAAAAAAAo...',
+      '..oAASSAAAWAo...',
+      '..oAASSAAAAAo...',
+      '..oaaaaaaaaao...',
+      '...oAAAAAAAo....',
+      '...oJJJJJJJo....',
+    ],
+  };
+
+  function frameRows(who, dir, step) {
+    const base = dir === 'left' ? 'right' : dir;
+    const legs = LEGS[base][step].map((r) => r.replace(/L/g, who.legs.L).replace(/F/g, who.legs.F));
+    return [...who[base], ...legs];
+  }
+
+  // Vẽ 1 khung. dir: down | up | left | right ; step: idle | a | b ; seated = chỉ vẽ phần trên (ngồi sau lưng ghế)
+  function draw(iso, who, dir, step, fx, fy, { seated = false } = {}) {
+    let rows = frameRows(who, dir, step);
+    if (seated) rows = rows.slice(0, 12);
+    const flip = dir === 'left';
+    if (!seated) { iso.blob(fx, fy, 6, 2, '#3a3a50'); iso.commit(null, 0.2); }
+    const n = rows.length;
+    rows.forEach((r, y) => {
+      for (let x = 0; x < r.length; x++) {
+        const ch = r[x];
+        if (ch === '.') continue;
+        const dx = x - 8;
+        iso.put(fx + (flip ? -dx - 1 : dx), fy - (n - 1 - y), PAL[ch] || '#ff00ff');
+      }
+    });
+    iso.commit(null);
+  }
+
+  global.TDPeople = { draw, BOSS, DEV };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+const W = 308, H = 222, X0 = 10, Y0 = 10, RW = 288, RH = 202;
+let night = false;
+const DESK_X = [28, 78, 128, 178].map((x) => X0 + x);
+const ROW_A = Y0 + 58, ROW_B = Y0 + 120;
+
+// Ai đang ngồi ở bàn nào: [hàng, cột, nhân vật]
+const SEATED = [['A', 1, 'DEV'], ['B', 2, 'DEV']];
+
+function staticScene(iso) {
+  TD.room(iso, { x0: X0, y0: Y0, w: RW, h: RH, wallH: 32, doorsLeft: [[110, 142]] });
+  // trên tường
+  TD.airCon(iso, X0 + 8, Y0 + 4);
+  TD.whiteboard(iso, X0 + 56, Y0 + 4, 48, 26);
+  TD.frame(iso, X0 + 110, Y0 + 8, 18, 18, 'cork');
+  TD.whiteboard(iso, X0 + 196, Y0 + 4, 44, 26, 'chart');
+  TD.frame(iso, X0 + 244, Y0 + 8, 16, 14, 'color');
+  // đồ sát tường
+  TD.suitcase(iso, X0 + 10, Y0 + 30);
+  TD.shelf(iso, X0 + 138, Y0 + 12, 34, 40);
+  TD.plant(iso, X0 + 176, Y0 + 27);
+  TD.waterCooler(iso, X0 + 266, Y0 + 16);
+  // 2 dãy cubicle (vẽ từ trên xuống dưới)
+  const items = [['crt', 'phone', 'lamp'], ['dual', 'papers'], ['laptop', 'crt', 'mug'], ['crt', 'phone', 'photo']];
+  for (const [row, y] of [['A', ROW_A], ['B', ROW_B]]) {
+    DESK_X.forEach((x, i) => {
+      TD.cubicle(iso, x, y, { items: items[(i + (row === 'B' ? 2 : 0)) % 4] });
+      const seat = SEATED.find((s) => s[0] === row && s[1] === i);
+      TD.chair(iso, x + 15, y + 36, seat ? 'dark' : i % 3 === 2 ? 'brown' : 'dark');
+      // người ngồi: đầu + vai nhô lên trên lưng ghế
+      if (seat) TDPeople.draw(iso, TDPeople[seat[2]], 'up', 'idle', x + 24, y + 42, { seated: true });
+    });
+  }
+  TD.printerTable(iso, X0 + 238, Y0 + 70);
+  TD.plant(iso, X0 + 262, Y0 + 168);
+  TD.plant(iso, X0 + 6, Y0 + 172);
+  TD.plant(iso, X0 + 240, Y0 + 108, false);
+}
+
+const cv = document.getElementById('cv'); cv.width = W; cv.height = H;
+const ctx = cv.getContext('2d');
+const bg = document.createElement('canvas'), layer = document.createElement('canvas');
+function renderStatic() {
+  const iso = Iso.createIso(W, H, { ox: 0, oy: 0, bg: '#2c2c3c' });
+  iso.S.night = night; iso.clear(); staticScene(iso); iso.finish(bg);
+}
+// Sếp đi tuần dọc lối đi dưới cùng
+function bossAt(t) {
+  const a = X0 + 24, b = X0 + 228, y = Y0 + 190, sp = 22;
+  const len = b - a, leg = len / sp, cyc = 2 * leg + 2;
+  const u = t % cyc;
+  if (u < leg) return { x: a + sp * u, y, dir: 'right', moving: true };
+  if (u < leg + 1) return { x: b, y, dir: 'down', moving: false };
+  if (u < 2 * leg + 1) return { x: b - sp * (u - leg - 1), y, dir: 'left', moving: true };
+  return { x: a, y, dir: 'down', moving: false };
+}
+let t0 = performance.now();
+function tick(now) {
+  const t = (now - t0) / 1000;
+  const iso = Iso.createIso(W, H, { ox: 0, oy: 0, bg: 'transparent' });
+  iso.S.night = night; iso.clear();
+  const s = bossAt(t);
+  const step = s.moving ? ['a', 'idle', 'b', 'idle'][Math.floor(t * 8) % 4] : 'idle';
+  TDPeople.draw(iso, TDPeople.BOSS, s.dir, step, Math.round(s.x), s.y);
+  iso.finish(layer);
+  ctx.clearRect(0, 0, W, H); ctx.drawImage(bg, 0, 0); ctx.drawImage(layer, 0, 0);
+  requestAnimationFrame(tick);
+}
+function fit() { const st = document.getElementById('stage').getBoundingClientRect(); const k = Math.max(1, Math.floor(Math.min(st.width / W, st.height / H))); cv.style.width = W * k + 'px'; cv.style.height = H * k + 'px'; }
+document.getElementById('btn-night').onclick = (e) => { night = !night; e.target.classList.toggle('on', night); renderStatic(); };
+document.getElementById('btn-png').onclick = () => { const o = document.createElement('canvas'); o.width = W * 4; o.height = H * 4; const g = o.getContext('2d'); g.imageSmoothingEnabled = false; g.drawImage(cv, 0, 0, o.width, o.height); const a = document.createElement('a'); a.download = 'van-phong-2d.png'; a.href = o.toDataURL(); a.click(); };
+window.addEventListener('resize', fit); fit();
+renderStatic(); requestAnimationFrame(tick);
+</script>
+</body>
+</html>
