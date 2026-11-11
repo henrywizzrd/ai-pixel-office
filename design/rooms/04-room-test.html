@@ -148,6 +148,7 @@
 
     // Đẩy lớp tạm xuống ảnh chính, viền 1px phía trong bằng màu outline
     function commit(outline = P.ink, alpha = 1) {
+      if (outline && S.olMap && S.olMap[outline]) outline = S.olMap[outline];
       const oc = outline ? ci(outline) : -1;
       for (const i of touched) {
         let c = layer[i];
@@ -285,6 +286,7 @@
     plum: { name: 'Gỗ mận', top: P.plum3, mid: P.plum2, dark: P.plum1, rim: P.plum4, ol: P.ink },
     coral: { name: 'Gỗ san hô', top: P.peach2, mid: P.cor4, dark: P.cor1, rim: P.sand, ol: P.mag1 },
     white: { name: 'Trắng kem', top: P.white, mid: P.cream1, dark: P.pk2, rim: P.white, ol: P.mag1 },
+    brown: { name: 'Gỗ nâu đỏ', top: '#8e4a3a', mid: '#71382d', dark: '#592726', rim: '#a35d48', ol: '#24120c' },
   };
   const FABRIC = {
     cream: { name: 'Kem', top: P.white, mid: P.cream1, dark: P.pk2, rim: P.white, ol: P.mag1 },
@@ -331,7 +333,7 @@
   // =================================================================
   add({
     id: 'desk', name: 'Bàn làm việc', group: 'work', size: [5, 3], place: 'wall',
-    variants: [WOOD.plum, WOOD.coral, WOOD.white],
+    variants: [WOOD.plum, WOOD.coral, WOOD.white, WOOD.brown],
     draw(it, iso, c, Z = 0) {
       for (const lv of [1, 23]) { it.box({ u0: 1, u1: 3, v0: lv, v1: lv + 2, z0: Z, z1: Z + 21 }, M(c.mid, c.mid, c.dark)); iso.commit(c.ol); }
       it.box({ u0: 26, u1: 39, v0: 1, v1: 25, z0: Z, z1: Z + 21 }, {
@@ -560,6 +562,8 @@
       { ...WOOD.plum, name: 'Bàn mận · code', s: 'code' },
       { ...WOOD.coral, name: 'Bàn san hô · thiết kế', s: 'design' },
       { ...WOOD.white, name: 'Bàn kem · biểu đồ', s: 'chart' },
+      { ...WOOD.brown, name: 'Bàn nâu đỏ · màn đen', s: 'glossy' },
+      { ...WOOD.brown, name: 'Bàn nâu đỏ · code', s: 'code' },
     ],
     draw(it, iso, c, Z = 0) {
       ITEMS.find((i) => i.id === 'desk').draw(it, iso, c, Z);
@@ -1000,6 +1004,7 @@
     plum: { name: 'Nhung mận', top: P.plum4, mid: P.plum3, dark: P.plum2, rim: P.pk1, ol: P.ink, leg: P.cream1 },
     coral: { name: 'Nhung san hô', top: P.peach2, mid: P.cor4, dark: P.cor1, rim: P.sand, ol: P.mag1, leg: P.plum2 },
     cream: { name: 'Vải kem', top: P.white, mid: P.cream1, dark: P.pk2, rim: P.white, ol: P.mag1, leg: P.plum2 },
+    gray: { name: 'Vải xám', top: '#a39a90', mid: '#8a8076', dark: '#6e645a', rim: '#bcb3a8', ol: '#24120c', leg: '#47191c' },
     mint: { name: 'Nhung bạc hà', top: P.lime, mid: P.mint, dark: P.mint2, rim: P.white, ol: P.mint3, leg: P.cream1 },
   };
   const WOOD = {
@@ -1063,7 +1068,7 @@
   });
   add({
     id: 'sofa-2', name: 'Sofa 2 chỗ', group: 'lounge', size: [5, 4], place: 'wall',
-    variants: [FABRIC.coral, FABRIC.plum, FABRIC.cream, FABRIC.mint],
+    variants: [FABRIC.coral, FABRIC.plum, FABRIC.cream, FABRIC.mint, FABRIC.gray],
     draw(it, iso, c, Z = 0) { drawSofa(it, iso, c, Z, 2); },
   });
   add({

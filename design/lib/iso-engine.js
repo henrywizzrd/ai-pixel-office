@@ -121,6 +121,7 @@
 
     // Đẩy lớp tạm xuống ảnh chính, viền 1px phía trong bằng màu outline
     function commit(outline = P.ink, alpha = 1) {
+      if (outline && S.olMap && S.olMap[outline]) outline = S.olMap[outline];
       const oc = outline ? ci(outline) : -1;
       for (const i of touched) {
         let c = layer[i];

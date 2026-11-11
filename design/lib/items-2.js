@@ -13,6 +13,7 @@
     plum: { name: 'Nhung mận', top: P.plum4, mid: P.plum3, dark: P.plum2, rim: P.pk1, ol: P.ink, leg: P.cream1 },
     coral: { name: 'Nhung san hô', top: P.peach2, mid: P.cor4, dark: P.cor1, rim: P.sand, ol: P.mag1, leg: P.plum2 },
     cream: { name: 'Vải kem', top: P.white, mid: P.cream1, dark: P.pk2, rim: P.white, ol: P.mag1, leg: P.plum2 },
+    gray: { name: 'Vải xám', top: '#a39a90', mid: '#8a8076', dark: '#6e645a', rim: '#bcb3a8', ol: '#24120c', leg: '#47191c' },
     mint: { name: 'Nhung bạc hà', top: P.lime, mid: P.mint, dark: P.mint2, rim: P.white, ol: P.mint3, leg: P.cream1 },
   };
   const WOOD = {
@@ -76,7 +77,7 @@
   });
   add({
     id: 'sofa-2', name: 'Sofa 2 chỗ', group: 'lounge', size: [5, 4], place: 'wall',
-    variants: [FABRIC.coral, FABRIC.plum, FABRIC.cream, FABRIC.mint],
+    variants: [FABRIC.coral, FABRIC.plum, FABRIC.cream, FABRIC.mint, FABRIC.gray],
     draw(it, iso, c, Z = 0) { drawSofa(it, iso, c, Z, 2); },
   });
   add({
