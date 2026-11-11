@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Nhân vật khối vuông (kiểu Steve) · thử trên nền văn phòng</title>
+<style>
+  html, body { margin: 0; }
+  body { background: #2c2c3c; font-family: ui-monospace, Consolas, monospace; color: #ebe4f2; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 10px; }
+  .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; font-size: 12px; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
+  h3 { margin: 6px 0 0; font-size: 13px; font-weight: normal; opacity: .8; }
+</style>
+</head>
+<body>
+  <h3>Bảng sprite 16×32 · xuống / lên / ngang · đứng / bước A / bước B</h3>
+  <canvas id="sheet"></canvas>
+  <h3>Đi lại trên nền văn phòng</h3>
+  <div class="bar">Nền: <input type="file" id="file" accept="image/*" /> (chọn Office_Design_1.gif / png nếu chưa hiện)</div>
+  <canvas id="cv"></canvas>
+<script src="../lib/iso-engine.js"></script>
+<script src="../lib/blocky.js"></script>
+<script>
+// Ảnh nền KHÔNG nằm trong repo (asset trả phí). Bản gửi riêng sẽ nhúng sẵn vào BG_DATA.
+const BG_DATA = window.BG_DATA || 'office-bg.png';
+const W = 416, H = 384;
+
+// ---------- bảng sprite ----------
+(function sheet() {
+  const cast = [['BOSS', Blocky.BOSS], ['DEV', Blocky.DEV]];
+  const dirs = ['down', 'up', 'right', 'left'], frames = ['idle', 'a', 'b'];
+  const cw = 22, ch = 40, SW = dirs.length * frames.length * cw + 8, SH = cast.length * ch + 8;
+  const iso = Iso.createIso(SW, SH, { ox: 0, oy: 0, bg: '#e8e4ee' }); iso.clear();
+  cast.forEach(([, look], r) => {
+    let c = 0;
+    for (const d of dirs) for (const f of frames) { Blocky.draw(iso, look, d, f, 4 + c * cw + 11, 4 + r * ch + 35); c++; }
+  });
+  const cv = document.getElementById('sheet'); iso.finish(cv);
+  cv.style.width = SW * 4 + 'px'; cv.style.height = SH * 4 + 'px';
+})();
+
+// ---------- cảnh đi lại ----------
+const cv = document.getElementById('cv'); cv.width = W; cv.height = H;
+const ctx = cv.getContext('2d');
+const layer = document.createElement('canvas');
+let bg = null;
+function loadBg(src) { const im = new Image(); im.onload = () => (bg = im); im.src = src; }
+loadBg(BG_DATA);
+document.getElementById('file').onchange = (e) => { const f = e.target.files[0]; if (f) loadBg(URL.createObjectURL(f)); };
+
+// lộ trình: danh sách điểm, đi vòng lặp; dừng ngắn ở mỗi điểm
+const WALKERS = [
+  { look: Blocky.BOSS, path: [[250, 126], [380, 126], [380, 150], [250, 150]], speed: 18 },
+  { look: Blocky.DEV, path: [[30, 300], [170, 300], [170, 350], [30, 350]], speed: 26 },
+];
+function segInfo(w, t) {
+  const pts = w.path, legs = [];
+  let total = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    const len = Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]);
+    legs.push({ a, b, dur: len / w.speed }); total += len / w.speed + 0.8;
+  }
+  let u = t % total;
+  for (const L of legs) {
+    if (u < 0.8) return { x: L.a[0], y: L.a[1], dir: 'down', moving: false };
+    u -= 0.8;
+    if (u < L.dur) {
+      const k = u / L.dur, dx = L.b[0] - L.a[0], dy = L.b[1] - L.a[1];
+      const dir = dx > 0 ? 'right' : dx < 0 ? 'left' : dy > 0 ? 'down' : 'up';
+      return { x: L.a[0] + dx * k, y: L.a[1] + dy * k, dir, moving: true };
+    }
+    u -= L.dur;
+  }
+  return { x: pts[0][0], y: pts[0][1], dir: 'down', moving: false };
+}
+
+const t0 = performance.now();
+function tick(now) {
+  const t = (now - t0) / 1000;
+  const iso = Iso.createIso(W, H, { ox: 0, oy: 0, bg: 'transparent' }); iso.clear();
+  const states = WALKERS.map((w, i) => ({ w, s: segInfo(w, t + i * 3) })).sort((a, b) => a.s.y - b.s.y);
+  for (const { w, s } of states) {
+    const step = s.moving ? ['a', 'idle', 'b', 'idle'][Math.floor(t * 7) % 4] : 'idle';
+    Blocky.draw(iso, w.look, s.dir, step, Math.round(s.x), Math.round(s.y));
+  }
+  iso.finish(layer);
+  ctx.fillStyle = '#9c9cae'; ctx.fillRect(0, 0, W, H);
+  if (bg) ctx.drawImage(bg, 0, 0, W, H);
+  ctx.drawImage(layer, 0, 0);
+  requestAnimationFrame(tick);
+}
+function fit() { const k = Math.max(1, Math.floor(Math.min((innerWidth - 20) / W, 3))); cv.style.width = W * k + 'px'; cv.style.height = H * k + 'px'; }
+addEventListener('resize', fit); fit();
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
