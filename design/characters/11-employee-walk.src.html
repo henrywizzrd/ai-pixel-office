@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Employee đi khắp phòng · Phòng thử · ghép từ thư viện đồ vật</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body { background: #fad1a9; font-family: ui-monospace, Consolas, monospace; color: #4c2d54;
+         display: flex; flex-direction: column; align-items: center; }
+  body.night { background: #2a1c34; color: #f7dcd0; }
+  .bar { display: flex; gap: 6px; padding: 10px; flex-wrap: wrap; justify-content: center; }
+  button { font: inherit; font-size: 12px; padding: 5px 10px; border-radius: 4px; cursor: pointer;
+           background: #fffbf5; color: #4c2d54; border: 2px solid #4c2d54; }
+  button.on { background: #4c2d54; color: #fffbf5; }
+  #stage { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; min-height: 0; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <button id="btn-night">Ban đêm</button>
+    <button id="btn-png">Tải PNG</button>
+  </div>
+  <div id="stage"><canvas id="cv"></canvas></div>
+
+<script src="../lib/iso-engine.js"></script>
+<script src="../lib/items.js"></script>
+<script src="../lib/items-2.js"></script>
+<script src="../lib/employee-sprites.js"></script>
+<script>
+// =====================================================================
+//  PHÒNG THỬ — chỉ khai báo đồ vật + vị trí, mọi hình vẽ lấy từ thư viện
+//  Toạ độ thế giới: x chạy dọc tường phải, y chạy dọc tường trái (đơn vị px, 8px = 1 ô)
+//  Đồ dựa tường phải dùng hướng 'R' với at('R', x, y)
+//  Đồ dựa tường trái dùng hướng 'L' với at('L', y, x)
+// =====================================================================
+const RX = 128, RY = 120, WH = 80;          // dài tường phải, dài tường trái, cao tường
+const W = 320, H = 240;
+const item = (id) => ITEMS.find((i) => i.id === id);
+const variant = (id, name) => item(id).variants.find((v) => v.name === name) || item(id).variants[0];
+
+function scene(iso) {
+  Iso.cornerRoom(iso, RX, RY, WH);
+
+  // 1) Cây lớn ở góc trong cùng
+  item('big-plant').draw(iso.at('R', 2, 2), iso, variant('big-plant', 'Cây bụi'));
+
+  // 2) Sofa 2 chỗ cạnh cây, dựa tường phải
+  item('sofa-2').draw(iso.at('R', 24, 1), iso, variant('sofa-2', 'Nhung san hô'));
+
+  // 3) Bàn 1 (tường trái): bộ máy tính = case + màn hình + phím chuột
+  item('workstation').draw(iso.at('L', 26, 1), iso, variant('workstation', 'Bàn mận · màn đen'));
+
+  // 4) Bàn 2 (tường trái): 1 màn hình + 1 laptop + phím chuột
+  const D2 = 72;                                                // vị trí bàn 2 dọc tường trái
+  item('desk').draw(iso.at('L', D2, 1), iso, variant('desk', 'Gỗ mận'));
+  item('monitor').draw(iso.at('L', D2 + 1, 2), iso, variant('monitor', 'Code'), 24);
+  item('keyboard').draw(iso.at('L', D2 + 1, 15), iso, variant('keyboard', 'Kem'), 24);
+  item('laptop').draw(iso.at('L', D2 + 24, 9), iso, variant('laptop', 'Bạc'), 24);
+
+}
+
+// ---------------------------------------------------------------------
+let night = false;
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const bg = document.createElement('canvas'), layer = document.createElement('canvas');
+const OX = RY + (W - RX - RY) / 2, OY = WH + 12;
+function render() {
+  const iso = Iso.createIso(W, H, { ox: OX, oy: OY });
+  iso.S.night = night; iso.clear(); scene(iso); iso.finish(bg);
+  cv.width = W; cv.height = H;
+  document.body.classList.toggle('night', night); fit();
+}
+
+// Vẽ 1 frame sprite, chân tại ô sàn (x, y); flip = lật gương
+function drawSprite(iso, spr, k, x, y, flip = false) {
+  const f = spr.frames[k], w = spr.w;
+  const [fx, fy] = iso.proj(x, y, 0);
+  iso.blob(fx, fy, 8, 3, '#3a1c2c'); iso.commit(null, 0.25);
+  const ox = fx - Math.floor(w / 2), oy = fy - f.length + 1;
+  f.forEach((row, j) => [...row].forEach((ch, i) => ch !== '.' && iso.put(ox + (flip ? w - 1 - i : i), oy + j, spr.pal[ch])));
+  iso.commit(null);
+}
+
+// Hướng iso → sprite (4 góc chéo Tyson vẽ):
+//   +x xuống-phải = 'xp' · +y xuống-trái = 'yp' · -x lên-trái = 'xm' · -y lên-phải = 'ym'
+function dirOf(dx, dy) {
+  if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? 'xp' : 'xm';
+  return dy > 0 ? 'yp' : 'ym';
+}
+// Lộ trình đi khắp phòng (toạ độ sàn: x dọc tường phải, y dọc tường trái), dừng 1 nhịp ở mỗi điểm
+const ROUTE = [[38, 44], [112, 44], [112, 108], [72, 108], [72, 76], [38, 76]];
+const SPEED = 16, PAUSE = 0.9;
+const LEGS = ROUTE.map((a, i) => { const b = ROUTE[(i + 1) % ROUTE.length]; return { a, b, d: Math.hypot(b[0] - a[0], b[1] - a[1]) / SPEED }; });
+const TOTAL = LEGS.reduce((s, l) => s + l.d + PAUSE, 0);
+let lastDir = 'xp';
+function walkerAt(t) {
+  let u = t % TOTAL;
+  for (const L of LEGS) {
+    const dir = dirOf(L.b[0] - L.a[0], L.b[1] - L.a[1]);
+    if (u < PAUSE) return { x: L.a[0], y: L.a[1], dir: lastDir, moving: false };
+    u -= PAUSE;
+    if (u < L.d) { const k = u / L.d; lastDir = dir; return { x: L.a[0] + (L.b[0] - L.a[0]) * k, y: L.a[1] + (L.b[1] - L.a[1]) * k, dir, moving: true }; }
+    u -= L.d;
+  }
+  return { x: ROUTE[0][0], y: ROUTE[0][1], dir: lastDir, moving: false };
+}
+const t0 = performance.now();
+function tick(now) {
+  const t = (now - t0) / 1000;
+  const iso = Iso.createIso(W, H, { ox: OX, oy: OY, bg: 'transparent' }); iso.S.night = night; iso.clear();
+  const s = walkerAt(t);
+  drawSprite(iso, EMPLOYEE[s.dir], s.moving ? Math.floor(t * 7) % 4 : 4, Math.round(s.x), Math.round(s.y));
+  iso.finish(layer);
+  ctx.clearRect(0, 0, W, H); ctx.drawImage(bg, 0, 0); ctx.drawImage(layer, 0, 0);
+  requestAnimationFrame(tick);
+}
+function fit() {
+  const st = document.getElementById('stage').getBoundingClientRect();
+  const s = Math.max(1, Math.floor(Math.min(st.width / W, st.height / H)));
+  cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+}
+document.getElementById('btn-night').onclick = (e) => { night = !night; e.target.classList.toggle('on', night); render(); };
+document.getElementById('btn-png').onclick = () => {
+  const o = document.createElement('canvas'); o.width = W * 4; o.height = H * 4;
+  const g = o.getContext('2d'); g.imageSmoothingEnabled = false; g.drawImage(cv, 0, 0, o.width, o.height);
+  const a = document.createElement('a'); a.download = 'phong-thu.png'; a.href = o.toDataURL(); a.click();
+};
+window.addEventListener('resize', fit);
+render(); requestAnimationFrame(tick);
+</script>
+</body>
+</html>
